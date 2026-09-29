@@ -197,8 +197,6 @@ button {
   .reasoning-panel li { @apply flex gap-2 text-xs leading-5 text-slate-500; }
   .reasoning-panel li span { @apply grid size-5 shrink-0 place-items-center rounded-full bg-white text-[10px] font-bold text-blue-600; }
   .suggestion-card { @apply mt-3 rounded-2xl border border-blue-200 bg-white p-3 shadow-sm; }
-  .proposal-toolbar { @apply flex min-h-16 shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4; }
-  .question-preview { @apply mt-1 whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-800; }
   .proposal-document-text { @apply min-h-[430px] whitespace-pre-wrap py-2 text-base leading-8 text-slate-700; }
   .proposal-context { @apply whitespace-pre-wrap; }
   .inline-review { @apply my-2 whitespace-normal; }
@@ -212,11 +210,6 @@ button {
   .inline-change.before { @apply bg-rose-50/70 text-rose-950; }
   .inline-change.after { @apply bg-emerald-50/70 text-emerald-950; }
   .change-marker { @apply select-none font-mono font-bold text-slate-400; }
-  .change-decision { @apply rounded-full px-2 py-0.5 text-[10px] font-bold; }
-  .change-decision.accepted { @apply bg-emerald-100 text-emerald-700; }
-  .change-decision.rejected { @apply bg-rose-100 text-rose-700; }
-  .inline-review.accepted .inline-hunk { @apply border-emerald-200; }
-  .inline-review.rejected .inline-hunk { @apply opacity-60; }
   .mobile-tabs { @apply grid h-12 shrink-0 grid-cols-3 border-b border-slate-200 bg-white lg:hidden; }
   .mobile-tabs button { @apply flex items-center justify-center gap-1.5 border-b-2 border-transparent text-xs font-bold text-slate-400; }
   .mobile-tabs button svg { @apply size-4; }

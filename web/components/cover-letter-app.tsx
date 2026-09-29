@@ -17,7 +17,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { useAppState } from "@/hooks/use-app-state"
 import { createInlineDiff } from "@/lib/essay-diff"
 import { localServices } from "@/lib/local-services"
-import type { AppState, ApplicationStatus, ChatSession, Essay, EvidenceFile, Project } from "@/lib/domain"
+import type { AppState, ApplicationStatus, ChatSession, Essay, EssaySuggestion, EvidenceFile, Project } from "@/lib/domain"
 
 const statusLabel: Record<ApplicationStatus, string> = { pending: "대기중", passed: "합격", failed: "불합격" }
 type ProposalRef = { sessionId: string; messageId: string; suggestionId: string }
@@ -115,10 +115,11 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
   const essays = state.essays[projectId] ?? []
   const selectedEssay = essays.find((essay) => essay.id === selectedEssayId) ?? essays[0]
   const activeSuggestion = proposalRef ? state.chats[projectId]?.find((session) => session.id === proposalRef.sessionId)?.messages.find((message) => message.id === proposalRef.messageId)?.suggestions?.find((suggestion) => suggestion.id === proposalRef.suggestionId) : undefined
+  const hasPendingChanges = activeSuggestion?.changeStatuses ? activeSuggestion.changeStatuses.includes("pending") : activeSuggestion?.status === "pending"
   const createEssay = () => { const essay = localServices.essays.create(project.id); setProposalRef(null); setSelectedEssayId(essay.id); setMobilePane("editor") }
   const previewSuggestion = (reference: ProposalRef & { essayId: string }) => { setSelectedEssayId(reference.essayId); setProposalRef(reference); setMobilePane("editor") }
   const filePane = <FilePane state={state} project={project} essays={essays} selectedEssayId={selectedEssay?.id ?? ""} onSelectEssay={(essayId) => { setProposalRef(null); setSelectedEssayId(essayId); setMobilePane("editor") }} onCreateEssay={createEssay} onManageFiles={() => setFilesOpen(true)} />
-  const editorPane = activeSuggestion && proposalRef && selectedEssay ? <ProposalEditor project={project} essay={selectedEssay} reference={proposalRef} suggestion={activeSuggestion} onClose={() => setProposalRef(null)} /> : selectedEssay ? <EditorPane key={selectedEssay.id} project={project} essay={selectedEssay} /> : <EmptyEssay onCreate={createEssay} />
+  const editorPane = selectedEssay ? <EditorPane key={selectedEssay.id} project={project} essay={selectedEssay} review={activeSuggestion && proposalRef && hasPendingChanges ? { reference: proposalRef, suggestion: activeSuggestion } : undefined} onReviewComplete={() => setProposalRef(null)} /> : <EmptyEssay onCreate={createEssay} />
   const chatPane = <ChatPane state={state} project={project} essayId={selectedEssay?.id} onPreviewSuggestion={previewSuggestion} />
   const closeAnalysis = (open: boolean) => setAnalysisOpen(open)
   return <main className="workspace-shell"><div className="workspace-topbar"><button onClick={() => router.push("/hub")} className="icon-button"><ArrowLeft className="size-4" /></button><div className="min-w-0"><p className="truncate text-sm font-bold">{project.company} · {project.title}</p><p className="text-xs text-slate-400">{project.role}</p></div><button onClick={() => setEditOpen(true)} className="icon-button" title="프로젝트 정보 수정"><Pencil className="size-4" /></button><div className="ml-auto flex items-center gap-2"><button className="dashboard-link" onClick={() => setAnalysisOpen(true)}><BarChart3 className="size-4" /><span className="hidden sm:inline">AI 분석</span></button><StatusSelect project={project} /></div></div><div className="mobile-tabs"><button className={mobilePane === "files" ? "active" : ""} onClick={() => setMobilePane("files")}><FolderOpen />파일</button><button className={mobilePane === "editor" ? "active" : ""} onClick={() => setMobilePane("editor")}><FileText />작성</button><button className={mobilePane === "chat" ? "active" : ""} onClick={() => setMobilePane("chat")}><MessageSquareText />AI 코치</button></div><div className="hidden min-h-0 flex-1 lg:block"><ResizablePanelGroup orientation="horizontal"><ResizablePanel defaultSize={20} minSize={15}>{filePane}</ResizablePanel><ResizableHandle withHandle /><ResizablePanel defaultSize={52} minSize={35}>{editorPane}</ResizablePanel><ResizableHandle withHandle /><ResizablePanel defaultSize={28} minSize={20}>{chatPane}</ResizablePanel></ResizablePanelGroup></div><div className="min-h-0 flex-1 lg:hidden">{mobilePane === "files" && filePane}{mobilePane === "editor" && editorPane}{mobilePane === "chat" && chatPane}</div>{editOpen && <ProjectDialog open={editOpen} onOpenChange={setEditOpen} state={state} project={project} />}{filesOpen && <ManageFilesDialog open={filesOpen} onOpenChange={setFilesOpen} state={state} project={project} />}{analysisOpen && <AnalysisDialog open={analysisOpen} onOpenChange={closeAnalysis} state={state} project={project} />}</main>
@@ -133,56 +134,42 @@ function FilePane({ state, project, essays, selectedEssayId, onSelectEssay, onCr
   return <section className="pane bg-slate-950 text-slate-200"><div className="pane-heading border-slate-800"><div><p className="pane-kicker">EXPLORER</p><h2 className="font-bold">프로젝트 파일</h2></div></div><div className="min-h-0 flex-1 overflow-y-auto p-2"><div className="mb-1 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />COVER LETTER</span><button onClick={onCreateEssay} className="dark-icon-button" title="자소서 문항 추가"><Plus className="size-4" /></button></div>{essays.map((essay) => <button key={essay.id} onClick={() => onSelectEssay(essay.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${selectedEssayId === essay.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><FileText className="size-4 shrink-0" /><span className="truncate">{essay.title}</span></button>)}<div className="mb-1 mt-5 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />ATTACHMENTS</span><button onClick={onManageFiles} className="dark-icon-button" title="허브 자료 선택 또는 업로드"><Paperclip className="size-4" /></button></div>{files.length ? files.map((file) => <button key={file.id} onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-slate-300 hover:bg-slate-800 hover:text-white"><Paperclip className="size-4 shrink-0 text-blue-400" /><span className="truncate">{file.name}</span></button>) : <p className="px-3 py-5 text-center text-xs leading-5 text-slate-500">연결된 증빙 자료가 없습니다.<br />클립 버튼으로 허브 자료를 선택하세요.</p>}</div><div className="border-t border-slate-800 p-4 text-xs leading-5 text-slate-500">문항별 파일을 선택하면 중앙 에디터에서 각각 작성할 수 있습니다.</div></section>
 }
 
-function EditorPane({ project, essay }: { project: Project; essay: Essay }) {
+function EditorPane({ project, essay, review, onReviewComplete }: { project: Project; essay: Essay; review?: { reference: ProposalRef; suggestion: EssaySuggestion }; onReviewComplete: () => void }) {
   const [title, setTitle] = useState(essay.title)
   const [question, setQuestion] = useState(essay.question)
   const [answer, setAnswer] = useState(essay.answer)
   const changed = title !== essay.title || question !== essay.question || answer !== essay.answer
-  useEffect(() => {
-    const syncAcceptedSuggestion = (event: Event) => {
-      const detail = (event as CustomEvent<{ essayId: string; answer: string }>).detail
-      if (detail.essayId === essay.id) setAnswer(detail.answer)
-    }
-    window.addEventListener("coverletteride:essay-accepted", syncAcceptedSuggestion)
-    return () => window.removeEventListener("coverletteride:essay-accepted", syncAcceptedSuggestion)
-  }, [essay.id])
   useEffect(() => { if (!changed) return; const timer = setTimeout(() => localServices.essays.save(project.id, essay.id, { title, question, answer }), 500); return () => clearTimeout(timer) }, [answer, changed, essay.id, project.id, question, title])
   const chars = answer.replace(/\s/g, "").length
-  return <section className="pane bg-slate-100"><div className="pane-heading bg-white"><div><p className="pane-kicker text-blue-600">COVER LETTER</p><input aria-label="문항 파일명" value={title} onChange={(event) => setTitle(event.target.value)} className="w-full bg-transparent font-bold outline-none" /></div><span className="text-xs font-semibold text-slate-400">{changed ? "저장 중…" : "저장됨"}</span></div><div className="editor-scroll"><div className="document-page"><div className="mb-6"><p className="text-sm font-bold text-blue-600">{project.company} · {project.role}</p><label className="mt-5 block"><span className="form-label">질문</span><textarea value={question} onChange={(event) => setQuestion(event.target.value)} className="question-editor" placeholder="자기소개서 문항을 입력하세요." /></label></div><label><span className="form-label">답변</span><textarea aria-label="자기소개서 답변" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="이 문항에 대한 나만의 경험을 구체적으로 작성해 보세요…" className="essay-editor" /></label><div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs font-semibold text-slate-400"><span>공백 제외 {chars.toLocaleString()}자</span><span>권장 700–1,000자</span></div></div></div></section>
+  const decide = (changeIndex: number, decision: "accepted" | "rejected", pendingCount: number) => {
+    if (!review) return
+    const args = [project.id, review.reference.sessionId, review.reference.messageId, review.suggestion.id, changeIndex] as const
+    const nextAnswer = decision === "accepted" ? localServices.acceptSuggestion(...args) : localServices.rejectSuggestion(...args)
+    if (nextAnswer !== undefined) setAnswer(nextAnswer)
+    toast[decision === "accepted" ? "success" : "info"](`변경 ${changeIndex + 1}을 ${decision === "accepted" ? "반영했어요." : "거절했어요."}`)
+    if (pendingCount === 1) onReviewComplete()
+  }
+  return <section className="pane bg-slate-100"><div className="pane-heading bg-white"><div><p className="pane-kicker text-blue-600">COVER LETTER</p><input aria-label="문항 파일명" value={title} onChange={(event) => setTitle(event.target.value)} className="w-full bg-transparent font-bold outline-none" /></div><span className="text-xs font-semibold text-slate-400">{review ? "AI 제안 검토 중" : changed ? "저장 중…" : "저장됨"}</span></div><div className="editor-scroll"><div className="document-page"><div className="mb-6"><p className="text-sm font-bold text-blue-600">{project.company} · {project.role}</p><label className="mt-5 block"><span className="form-label">질문</span><textarea value={question} onChange={(event) => setQuestion(event.target.value)} className="question-editor" placeholder="자기소개서 문항을 입력하세요." /></label></div><div><span className="form-label">답변</span>{review ? <InlineSuggestion suggestion={review.suggestion} onDecide={decide} /> : <textarea aria-label="자기소개서 답변" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="이 문항에 대한 나만의 경험을 구체적으로 작성해 보세요…" className="essay-editor" />}</div><div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs font-semibold text-slate-400"><span>공백 제외 {chars.toLocaleString()}자</span><span>권장 700–1,000자</span></div></div></div></section>
 }
 
 function EmptyEssay({ onCreate }: { onCreate: () => void }) {
   return <section className="pane grid place-items-center bg-slate-100"><div className="text-center"><FilePlus2 className="mx-auto size-10 text-blue-500" /><h2 className="mt-4 text-lg font-bold">작성할 문항을 추가하세요</h2><Button className="mt-4 bg-blue-600 hover:bg-blue-700" onClick={onCreate}><Plus />문항 추가</Button></div></section>
 }
 
-function ProposalEditor({ project, essay, reference, suggestion, onClose }: { project: Project; essay: Essay; reference: ProposalRef; suggestion: NonNullable<AppState["chats"][string][number]["messages"][number]["suggestions"]>[number]; onClose: () => void }) {
+function InlineSuggestion({ suggestion, onDecide }: { suggestion: EssaySuggestion; onDecide: (index: number, decision: "accepted" | "rejected", pendingCount: number) => void }) {
   const diff = createInlineDiff(suggestion.before, suggestion.after)
   const changeCount = diff.filter((part) => part.kind === "change").length
   const fallbackStatus = suggestion.status === "accepted" || suggestion.status === "rejected" ? suggestion.status : "pending"
   const decisions = Array.from({ length: changeCount }, (_, index) => suggestion.changeStatuses?.[index] ?? fallbackStatus)
-  const status = suggestion.status === "accepted" ? "모두 반영됨" : suggestion.status === "rejected" ? "모두 거절됨" : suggestion.status === "partial" ? "일부 검토됨" : "검토 필요"
+  const pendingCount = decisions.filter((decision) => decision === "pending").length
   let changeIndex = 0
-  const decide = (index: number, decision: "accepted" | "rejected") => {
-    if (decision === "accepted") localServices.acceptSuggestion(project.id, reference.sessionId, reference.messageId, suggestion.id, index)
-    else localServices.rejectSuggestion(project.id, reference.sessionId, reference.messageId, suggestion.id, index)
-    toast[decision === "accepted" ? "success" : "info"](`변경 ${index + 1}을 ${decision === "accepted" ? "반영했어요." : "거절했어요."}`)
-  }
-  return <section className="pane bg-slate-100">
-    <div className="proposal-toolbar">
-      <div className="min-w-0"><p className="pane-kicker text-blue-600">COVER LETTER · EDIT REVIEW</p><h2 className="truncate font-bold">{suggestion.essayTitle}</h2></div>
-      <div className="flex items-center gap-2"><span className={`rounded-full px-3 py-1.5 text-xs font-bold ${suggestion.status === "accepted" ? "bg-emerald-100 text-emerald-700" : suggestion.status === "rejected" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{status}</span><button onClick={onClose} className="icon-button" title="검토 닫기"><X className="size-4" /></button></div>
-    </div>
-    <div className="editor-scroll"><div className="document-page">
-      <div className="mb-6"><p className="text-sm font-bold text-blue-600">{project.company} · {project.role}</p><div className="mt-5"><span className="form-label">질문</span><p className="question-preview">{essay.question || "자기소개서 문항이 비어 있습니다."}</p></div></div>
-      <div><span className="form-label">답변 · 변경 제안 {changeCount}곳</span><div className="proposal-document-text">{diff.map((part, index) => {
+  return <div className="proposal-document-text">{diff.map((part, index) => {
         if (part.kind === "equal") return <span key={index} className="proposal-context">{part.text}</span>
         const currentIndex = changeIndex++
         const decision = decisions[currentIndex]
-        return <div key={index} className={`inline-review ${decision}`}><div className="inline-review-toolbar"><strong>변경 {currentIndex + 1}</strong>{decision === "pending" ? <div className="flex shrink-0 items-center gap-1.5"><Button size="sm" variant="outline" onClick={() => decide(currentIndex, "rejected")} className="h-7 gap-1 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-50"><X className="size-3" />Reject</Button><Button size="sm" onClick={() => decide(currentIndex, "accepted")} className="h-7 gap-1 bg-emerald-600 px-2 text-[11px] hover:bg-emerald-700"><Check className="size-3" />Accept</Button></div> : <span className={`change-decision ${decision}`}>{decision === "accepted" ? "반영됨" : "거절됨"}</span>}</div><div className="inline-hunk"><div className="inline-change before"><span className="change-marker">−</span><div><strong>원래 내용</strong><p>{part.before || "(추가되는 위치)"}</p></div></div><div className="inline-change after"><span className="change-marker">+</span><div><strong>수정본</strong><p>{part.after || "(삭제됨)"}</p></div></div></div></div>
-      })}</div><p className="mt-3 text-xs text-slate-400">각 변경을 승인한 경우에만 해당 문장이 실제 답변에 반영됩니다.</p></div>
-      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs font-semibold text-slate-400"><span>공백 제외 {suggestion.after.replace(/\s/g, "").length.toLocaleString()}자 (수정본)</span><span>권장 700–1,000자</span></div>
-    </div></div>
-  </section>
+        if (decision !== "pending") return <span key={index} className="proposal-context">{decision === "accepted" ? part.after : part.before}</span>
+        return <div key={index} className="inline-review"><div className="inline-review-toolbar"><strong>변경 {currentIndex + 1}</strong><div className="flex shrink-0 items-center gap-1.5"><Button size="sm" variant="outline" onClick={() => onDecide(currentIndex, "rejected", pendingCount)} className="h-7 gap-1 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-50"><X className="size-3" />Reject</Button><Button size="sm" onClick={() => onDecide(currentIndex, "accepted", pendingCount)} className="h-7 gap-1 bg-emerald-600 px-2 text-[11px] hover:bg-emerald-700"><Check className="size-3" />Accept</Button></div></div><div className="inline-hunk"><div className="inline-change before"><span className="change-marker">−</span><div><strong>원래 내용</strong><p>{part.before || "(추가되는 위치)"}</p></div></div><div className="inline-change after"><span className="change-marker">+</span><div><strong>수정본</strong><p>{part.after || "(삭제됨)"}</p></div></div></div></div>
+      })}</div>
 }
 
 function ChatPane({ state, project, essayId, onPreviewSuggestion }: { state: AppState; project: Project; essayId?: string; onPreviewSuggestion: (reference: ProposalRef & { essayId: string }) => void }) {

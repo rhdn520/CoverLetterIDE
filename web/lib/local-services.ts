@@ -404,6 +404,7 @@ export const localServices = {
         } : chat),
       },
     }))
+    return answer
   },
   rejectSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number) {
     const session = state.chats[projectId]?.find((item) => item.id === sessionId)
@@ -434,6 +435,7 @@ export const localServices = {
         } : chat),
       },
     }))
+    return answer
   },
   runAnalysis(projectId: string) {
     const project = state.projects.find((item) => item.id === projectId)

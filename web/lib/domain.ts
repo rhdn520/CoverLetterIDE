@@ -148,8 +148,8 @@ export interface EssayRepository {
 
 export interface AiService {
   chat(projectId: string, sessionId: string, prompt: string, contextIds?: string[]): { ok: boolean; error?: string; preview?: { messageId: string; suggestionId: string; essayId: string } }
-  acceptSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number): void
-  rejectSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number): void
+  acceptSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number): string | undefined
+  rejectSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number): string | undefined
   analyze(projectId: string): { ok: boolean; cached?: boolean; error?: string }
 }
 
