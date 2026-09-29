@@ -4,7 +4,6 @@ import type {
   AnalysisReport,
   AppState,
   AuthService,
-  ChatMessage,
   ChatSession,
   CreditService,
   Essay,
@@ -16,6 +15,7 @@ import type {
 } from "./domain"
 import { createInlineDiff } from "./essay-diff"
 import { createSyntheticEssays } from "./synthetic-data"
+import { extractTextFromBlob } from "./text-extract"
 
 const STORAGE_KEY = "coverletteride:v1"
 const DB_NAME = "coverletteride-files"
@@ -72,41 +72,6 @@ const seedState = (): AppState => {
   }
 }
 
-/**
- * v1의 단일 본문과 v2의 단일 채팅 목록을 최신 구조로 변환한다. 저장 데이터를
- * 지우지 않고 스키마만 승격하므로 기존 작성 내용과 AI 대화를 그대로 이어갈 수 있다.
- */
-function migrateState(value: unknown): AppState {
-  const saved = value as Partial<Omit<AppState, "version" | "essays" | "chats" | "contributions">> & {
-    version?: number
-    essays?: Record<string, Essay[] | { projectId: string; content: string; updatedAt: string }>
-    chats?: Record<string, ChatMessage[] | ChatSession[]>
-    contributions?: Array<Record<string, unknown>>
-  }
-  if (saved.version === 3) return saved as unknown as AppState
-  const fallback = seedState()
-  const migratedEssays = Object.fromEntries(
-    Object.entries(saved.essays ?? {}).map(([projectId, essay]) => {
-      if (Array.isArray(essay)) return [projectId, essay]
-      const legacy = essay as { content?: string; updatedAt?: string }
-      return [projectId, [{ id: `migrated-${projectId}`, projectId, title: "문항 1", question: "자기소개서 문항", answer: legacy.content ?? "", order: 0, updatedAt: legacy.updatedAt ?? now() }]]
-    }),
-  )
-  const legacyContributions = (saved.contributions ?? []) as unknown as Array<Record<string, unknown>>
-  const contributions = legacyContributions.map((item) => ({
-    ...item,
-    applicationPeriod: typeof item.applicationPeriod === "string" ? item.applicationPeriod : "",
-    questions: Array.isArray(item.questions) ? item.questions : [{ question: "자기소개서 문항", answer: String(item.content ?? "") }],
-  })) as AppState["contributions"]
-  const chats = Object.fromEntries(Object.entries(saved.chats ?? {}).map(([projectId, items]) => {
-    if (!items.length) return [projectId, []]
-    if ("messages" in items[0]) return [projectId, items as ChatSession[]]
-    const messages = items as ChatMessage[]
-    return [projectId, [{ id: `migrated-chat-${projectId}`, title: "이전 대화", messages, createdAt: messages[0]?.createdAt ?? now(), updatedAt: messages[messages.length - 1]?.createdAt ?? now() }]]
-  }))
-  return { ...fallback, ...saved, version: 3, essays: migratedEssays, contributions, chats }
-}
-
 let state: AppState = seedState()
 let initialized = false
 const listeners = new Set<() => void>()
@@ -132,13 +97,14 @@ function ensureMonthlyCredits() {
 
 function init() {
   if (initialized || typeof window === "undefined") return
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved) {
-    try {
-      state = migrateState(JSON.parse(saved))
-    } catch {
-      state = seedState()
-    }
+  // 목업 단계에서는 새로고침 시 항상 최초 상태로 시작한다. 이전 세션에 저장된
+  // 상태와 업로드한 파일 원본을 비워 항상 동일한 초기 화면을 재현한다.
+  state = seedState()
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+    indexedDB.deleteDatabase(DB_NAME)
+  } catch {
+    // 저장소 초기화 실패는 목업 동작에 영향을 주지 않으므로 무시한다.
   }
   initialized = true
   ensureMonthlyCredits()
@@ -148,6 +114,11 @@ function update(recipe: (current: AppState) => AppState) {
   init()
   state = recipe(state)
   persist()
+}
+
+/** 단일 파일의 메타데이터 일부만 갱신한다. 텍스트 추출 결과 반영에 쓰인다. */
+function patchFile(fileId: string, patch: Partial<EvidenceFile>) {
+  update((s) => ({ ...s, files: s.files.map((item) => item.id === fileId ? { ...item, ...patch } : item) }))
 }
 
 function hash(value: string) {
@@ -197,6 +168,17 @@ async function getBlob(key: string) {
   })
   db.close()
   return blob
+}
+
+async function deleteBlob(key: string) {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("files", "readwrite")
+    tx.objectStore("files").delete(key)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
 }
 
 /**
@@ -262,7 +244,8 @@ export const localServices = {
       if (!extension || !["pdf", "jpg", "jpeg", "png", "doc", "docx", "hwpx"].includes(extension)) {
         throw new Error("지원하지 않는 파일 형식입니다.")
       }
-      const record: EvidenceFile = { id: id(), name: file.name, size: file.size, type: file.type, createdAt: now() }
+      // 업로드 직후에는 추출 대기 상태로 기록한다. 실제 텍스트는 아래에서 백그라운드로 채운다.
+      const record: EvidenceFile = { id: id(), name: file.name, size: file.size, type: file.type, createdAt: now(), extractionStatus: "pending" }
       // 메타데이터와 원본 Blob을 분리한다. 이는 Supabase의 DB 행과 Storage 객체 구조에 대응한다.
       await putBlob(record.id, file)
       update((s) => ({
@@ -274,6 +257,13 @@ export const localServices = {
             )
           : s.projects,
       }))
+      // LLM 컨텍스트 주입용 텍스트를 업로드 시점에 한 번 추출해 캐싱한다. 업로드 UX를
+      // 막지 않도록 결과를 기다리지 않고 비동기로 진행하며, 완료되면 상태가 갱신된다.
+      extractTextFromBlob(file.name, file).then((outcome) => {
+        patchFile(record.id, outcome.status === "done"
+          ? { extractionStatus: "done", extractedText: outcome.text }
+          : { extractionStatus: outcome.status })
+      }).catch(() => patchFile(record.id, { extractionStatus: "failed" }))
       return record
     },
     async download(file) {
@@ -285,6 +275,42 @@ export const localServices = {
       anchor.download = file.name
       anchor.click()
       URL.revokeObjectURL(url)
+    },
+    // 열람용 Object URL을 반환한다. URL 수명은 호출한 화면이 관리하며, 미리보기를
+    // 닫을 때 revoke해 메모리 누수를 막는다. Supabase 전환 시 서명된 URL로 대체된다.
+    async open(file) {
+      const blob = await getBlob(file.id)
+      if (!blob) throw new Error("파일 원본을 찾을 수 없습니다.")
+      const typedBlob = file.type ? blob.slice(0, blob.size, file.type) : blob
+      return URL.createObjectURL(typedBlob)
+    },
+    // 메타데이터와 원본 Blob을 함께 지우고, 이 파일을 참조하던 모든 프로젝트의
+    // 연결도 정리한다. Supabase 전환 시 Storage 객체 삭제와 DB 행 삭제에 대응한다.
+    async remove(file) {
+      await deleteBlob(file.id)
+      update((s) => ({
+        ...s,
+        files: s.files.filter((item) => item.id !== file.id),
+        projects: s.projects.map((project) =>
+          project.fileIds.includes(file.id)
+            ? { ...project, fileIds: project.fileIds.filter((fileId) => fileId !== file.id) }
+            : project,
+        ),
+      }))
+    },
+    async extractText(file) {
+      // 최신 메타데이터를 확인해 이미 추출된 텍스트가 있으면 그대로 재사용한다.
+      const current = state.files.find((item) => item.id === file.id) ?? file
+      if (current.extractionStatus === "done" && current.extractedText !== undefined) return current.extractedText
+      const blob = await getBlob(file.id)
+      if (!blob) throw new Error("파일 원본을 찾을 수 없습니다.")
+      const outcome = await extractTextFromBlob(file.name, blob)
+      if (outcome.status === "done") {
+        patchFile(file.id, { extractionStatus: "done", extractedText: outcome.text })
+        return outcome.text
+      }
+      patchFile(file.id, { extractionStatus: outcome.status })
+      return ""
     },
   } satisfies FileRepository,
   essays: {
@@ -321,13 +347,22 @@ export const localServices = {
       }))
       return true
     },
+    // 사용자가 크레딧을 충전한다. 목업이므로 결제 없이 즉시 잔액에 더한다.
+    // 매 충전은 고유 referenceId를 갖는 별도 거래로 기록한다.
+    charge(amount, reason) {
+      update((s) => ({
+        ...s,
+        creditBalance: s.creditBalance + amount,
+        transactions: [...s.transactions, { id: id(), amount, reason, referenceId: `charge-${id()}`, createdAt: now() }],
+      }))
+    },
   } satisfies CreditService,
   startChat(projectId: string) {
     const session: ChatSession = { id: id(), title: "새 대화", messages: [], createdAt: now(), updatedAt: now() }
     update((s) => ({ ...s, chats: { ...s.chats, [projectId]: [session, ...(s.chats[projectId] ?? [])] } }))
     return session
   },
-  sendChat(projectId: string, sessionId: string, prompt: string, contextIds: string[] = []) {
+  async sendChat(projectId: string, sessionId: string, prompt: string, contextIds: string[] = []) {
     if (!localServices.credits.spend(10, "AI 코치 사용", id())) return { ok: false, error: "크레딧이 부족합니다." }
     const projectEssays = state.essays[projectId] ?? []
     const referencedEssayIds = contextIds.filter((value) => value.startsWith("essay:")).map((value) => value.slice(6))
@@ -339,6 +374,25 @@ export const localServices = {
       return state.files.find((file) => file.id === referenceId)?.name
     }).filter((value): value is string => Boolean(value))
     const role = state.projects.find((item) => item.id === projectId)?.role ?? "지원 직무"
+
+    // 태그된 첨부 파일의 추출 텍스트를 컨텍스트 블록으로 조립한다. 실제 LLM 연동 시
+    // 이 블록들을 그대로 프롬프트에 직렬화하면 된다. 아직 추출 전이면 지금 추출한다.
+    const referencedFileIds = contextIds.filter((value) => value.startsWith("file:")).map((value) => value.slice(5))
+    const fileContexts: Array<{ name: string; text: string; status: "done" | "unsupported" | "empty" }> = []
+    for (const fileId of referencedFileIds) {
+      const file = state.files.find((item) => item.id === fileId)
+      if (!file) continue
+      const text = await localServices.files.extractText(file)
+      fileContexts.push({ name: file.name, text, status: text ? "done" : file.extractionStatus === "unsupported" ? "unsupported" : "empty" })
+    }
+    // 프롬프트에 실제로 주입될 컨텍스트 페이로드(디버그·검증용으로도 활용 가능).
+    const contextPayload = [
+      ...selectedTargets.map((essay) => `[자소서 문항: ${essay.title}]\n${essay.answer}`),
+      ...fileContexts.filter((item) => item.status === "done").map((item) => `[첨부자료: ${item.name}]\n${item.text}`),
+    ].join("\n\n")
+    void contextPayload
+    const usableFiles = fileContexts.filter((item) => item.status === "done")
+    const unreadableFiles = fileContexts.filter((item) => item.status !== "done")
     const suggestions = selectedTargets.map((essay) => {
       const before = essay.answer
       // 서로 떨어진 문장을 수정해 실제 에이전트가 여러 위치를 편집하는 모습을 재현한다.
@@ -350,13 +404,23 @@ export const localServices = {
       const changeCount = createInlineDiff(before, after).filter((part) => part.kind === "change").length
       return { id: id(), essayId: essay.id, essayTitle: essay.title, before, after, summary: "여러 문장의 표현과 근거를 다듬었습니다.", status: "pending" as const, changeStatuses: Array.from({ length: changeCount }, () => "pending" as const) }
     })
+    const fileNote = usableFiles.length
+      ? ` 태그하신 첨부자료(${usableFiles.map((item) => item.name).join(", ")})의 내용을 함께 참고했습니다.`
+      : ""
+    const unreadableNote = unreadableFiles.length
+      ? ` 다만 ${unreadableFiles.map((item) => item.name).join(", ")}는 텍스트 추출을 지원하지 않아 컨텍스트에 포함하지 못했습니다.`
+      : ""
     const response = suggestions.length
-      ? `${describeReviewPurpose(prompt, role)} 원문의 의미는 유지하면서 수정 지점을 나눴으니, 필요한 변경만 골라 반영해 주세요.`
-      : "수정할 자소서 문항을 찾지 못했습니다. @로 문항 파일을 선택해 주세요."
+      ? `${describeReviewPurpose(prompt, role)} 원문의 의미는 유지하면서 수정 지점을 나눴으니, 필요한 변경만 골라 반영해 주세요.${fileNote}${unreadableNote}`
+      : `수정할 자소서 문항을 찾지 못했습니다. @로 문항 파일을 선택해 주세요.${fileNote}${unreadableNote}`
     const userMessage = { id: id(), role: "user" as const, content: prompt, createdAt: now() }
     const assistantMessage = {
       id: id(), role: "assistant" as const, content: response,
-      reasoning: ["요청한 수정 방향과 태그된 자료를 확인했습니다.", "답변에서 구체성이 부족한 성과와 직무 연결 문장을 찾았습니다.", "원문을 보존한 상태로 적용 가능한 수정안을 생성했습니다."],
+      reasoning: [
+        usableFiles.length ? `태그된 첨부자료 ${usableFiles.length}건의 본문을 추출해 컨텍스트로 읽었습니다.` : "요청한 수정 방향과 태그된 자료를 확인했습니다.",
+        "답변에서 구체성이 부족한 성과와 직무 연결 문장을 찾았습니다.",
+        "원문을 보존한 상태로 적용 가능한 수정안을 생성했습니다.",
+      ],
       references: referenceNames,
       suggestions,
       createdAt: now(),

@@ -4,8 +4,8 @@ import { FormEvent, useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   ArrowLeft, Award, BarChart3, BriefcaseBusiness, CalendarDays, Check, ChevronRight,
-  Coins, Download, FilePlus2, FileText, FolderOpen, GraduationCap, LayoutDashboard,
-  History, LogOut, MessageSquareText, Paperclip, Pencil, Plus, Send, Sparkles, Upload, X,
+  Coins, CreditCard, Download, Eye, FilePlus2, FileText, FolderOpen, GraduationCap, LayoutDashboard,
+  History, LogOut, MessageSquareText, Paperclip, Pencil, Plus, Send, Sparkles, Trash2, Upload, X,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -30,7 +30,7 @@ function Logo() {
 
 function AppHeader({ state }: { state: AppState }) {
   const router = useRouter()
-  return <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-8"><button onClick={() => router.push("/hub")}><Logo /></button><nav className="hidden items-center gap-1 md:flex" aria-label="주요 메뉴"><NavButton icon={FolderOpen} label="프로젝트 허브" onClick={() => router.push("/hub")} /><NavButton icon={FilePlus2} label="자소서 기여" onClick={() => router.push("/contribute")} /></nav><div className="flex items-center gap-3"><div className="credit-pill"><Coins className="size-4" /><strong>{state.creditBalance.toLocaleString()}</strong><span className="hidden sm:inline">크레딧</span></div><button title="로그아웃" onClick={() => { localServices.auth.signOut(); router.push("/login") }} className="icon-button"><LogOut className="size-4" /></button></div></header>
+  return <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:px-8"><button onClick={() => router.push("/hub")}><Logo /></button><nav className="hidden items-center gap-1 md:flex" aria-label="주요 메뉴"><NavButton icon={FolderOpen} label="프로젝트 허브" onClick={() => router.push("/hub")} /><NavButton icon={FilePlus2} label="자소서 기여" onClick={() => router.push("/contribute")} /></nav><div className="flex items-center gap-3"><button title="크레딧 충전" onClick={() => router.push("/credits")} className="credit-pill transition hover:bg-amber-100"><Coins className="size-4" /><strong>{state.creditBalance.toLocaleString()}</strong><span className="hidden sm:inline">크레딧</span></button><button title="로그아웃" onClick={() => { localServices.auth.signOut(); router.push("/login") }} className="icon-button"><LogOut className="size-4" /></button></div></header>
 }
 
 function NavButton({ icon: Icon, label, onClick }: { icon: typeof FolderOpen; label: string; onClick: () => void }) {
@@ -48,6 +48,7 @@ export function CoverLetterApp() {
   const dashboard = pathname.match(/^\/projects\/([^/]+)\/dashboard$/)
   let page = <HubPage state={state} />
   if (pathname === "/contribute") page = <ContributePage state={state} />
+  if (pathname === "/credits") page = <CreditChargePage state={state} />
   if (workspace) page = <WorkspacePage state={state} projectId={workspace[1]} />
   if (dashboard) page = <LegacyDashboardRoute state={state} projectId={dashboard[1]} />
   return <div className="min-h-screen bg-slate-50 text-slate-950"><AppHeader state={state} />{page}<Toaster position="bottom-right" /></div>
@@ -72,12 +73,85 @@ function ProfileField({ icon: Icon, label, value, editing, onChange }: { icon: t
 
 function EvidenceSection({ state }: { state: AppState }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState<EvidenceFile | null>(null)
   const upload = async (files: FileList | null) => { for (const file of Array.from(files ?? [])) { try { await localServices.files.add(file); toast.success(`${file.name} 업로드 완료`) } catch (error) { toast.error(error instanceof Error ? error.message : "업로드에 실패했습니다.") } } }
-  return <section className="surface-card overflow-hidden"><div className="flex items-start justify-between border-b border-slate-100 p-5"><div><h2 className="section-title">증빙 자료</h2><p className="section-help">프로젝트에 필요한 파일을 한 곳에 모아두세요.</p></div><Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}><Upload />업로드</Button><input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.hwpx" onChange={(event) => upload(event.target.files)} /></div><div className="p-3">{state.files.length ? state.files.map((file) => <FileRow key={file.id} file={file} />) : <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-slate-200 text-center text-sm text-slate-400"><div><Paperclip className="mx-auto mb-2 size-6" /><p>아직 업로드한 자료가 없어요.</p><p className="mt-1 text-xs">PDF, 이미지, DOC, HWPX 지원</p></div></div>}</div></section>
+  return <section className="surface-card overflow-hidden"><div className="flex items-start justify-between border-b border-slate-100 p-5"><div><h2 className="section-title">첨부 자료</h2><p className="section-help">파일을 클릭하면 바로 열람할 수 있어요.</p></div><Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}><Upload />업로드</Button><input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.hwpx" onChange={(event) => upload(event.target.files)} /></div><div className="p-3">{state.files.length ? state.files.map((file) => <FileRow key={file.id} file={file} onOpen={() => setPreview(file)} onDelete={() => { if (preview?.id === file.id) setPreview(null) }} />) : <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-slate-200 text-center text-sm text-slate-400"><div><Paperclip className="mx-auto mb-2 size-6" /><p>아직 업로드한 자료가 없어요.</p><p className="mt-1 text-xs">PDF, 이미지, DOC, HWPX 지원</p></div></div>}</div>{preview && <FilePreviewDialog file={preview} onOpenChange={(open) => { if (!open) setPreview(null) }} />}</section>
 }
 
-function FileRow({ file }: { file: EvidenceFile }) {
-  return <div className="group flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-50"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600"><FileText className="size-4" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{file.name}</p><p className="text-xs text-slate-400">{formatBytes(file.size)}</p></div><button className="icon-button opacity-60 group-hover:opacity-100" title="다운로드" onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }}><Download className="size-4" /></button></div>
+function FileRow({ file, onOpen, onDelete }: { file: EvidenceFile; onOpen: () => void; onDelete: () => void }) {
+  const remove = async () => {
+    if (!window.confirm(`'${file.name}' 파일을 삭제할까요? 이 자료를 사용하는 모든 프로젝트에서도 제거됩니다.`)) return
+    try {
+      await localServices.files.remove(file)
+      onDelete()
+      toast.success(`${file.name}을 삭제했어요.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "삭제에 실패했습니다.")
+    }
+  }
+  return <div className="group flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-slate-50"><button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left" title="자료 열람"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600"><FileText className="size-4" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{file.name}</p><p className="text-xs text-slate-400">{formatBytes(file.size)}</p></div></button><button className="icon-button opacity-60 group-hover:opacity-100" title="열람" onClick={onOpen}><Eye className="size-4" /></button><button className="icon-button opacity-60 group-hover:opacity-100" title="다운로드" onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }}><Download className="size-4" /></button><button className="icon-button text-rose-500 opacity-60 hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100" title="삭제" onClick={remove}><Trash2 className="size-4" /></button></div>
+}
+
+const previewKind = (file: EvidenceFile): "image" | "pdf" | "unsupported" => {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+  if (["jpg", "jpeg", "png", "gif", "webp"].includes(extension)) return "image"
+  if (extension === "pdf") return "pdf"
+  return "unsupported"
+}
+
+function useFilePreviewUrl(file: EvidenceFile, enabled: boolean) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // FilePreviewBody는 파일마다 key로 remount하므로 이펙트 안에서 상태를 초기화할
+  // 필요가 없다. 각 파일은 항상 초기 상태(url=null)에서 시작한다.
+  useEffect(() => {
+    if (!enabled) return
+    let objectUrl: string | null = null
+    let active = true
+    localServices.files.open(file)
+      .then((value) => { if (active) { objectUrl = value; setUrl(value) } else { URL.revokeObjectURL(value) } })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : "파일을 열 수 없습니다.") })
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [file, enabled])
+  return { url, error }
+}
+
+function FilePreviewBody({ file, fillHeight = false }: { file: EvidenceFile; fillHeight?: boolean }) {
+  const kind = previewKind(file)
+  const { url, error } = useFilePreviewUrl(file, kind !== "unsupported")
+  const frameHeight = fillHeight ? "h-full min-h-0 flex-1" : "h-[66vh]"
+  const imageHeight = fillHeight ? "max-h-full" : "max-h-[66vh]"
+  return <div className={`grid place-items-center overflow-auto bg-slate-100 p-4 ${fillHeight ? "min-h-0 flex-1" : "max-h-[70vh] min-h-[320px]"}`}>{error ? <p className="text-sm text-rose-600">{error}</p> : kind === "unsupported" ? <div className="max-w-sm p-6 text-center"><FileText className="mx-auto size-10 text-blue-500" /><h3 className="mt-4 font-bold">미리보기를 지원하지 않는 형식이에요</h3><p className="mt-2 text-sm leading-6 text-slate-500">DOC, DOCX, HWPX 파일은 브라우저에서 바로 열람할 수 없어요. 아래에서 원본을 내려받아 확인하세요.</p><Button className="mt-4 bg-blue-600 hover:bg-blue-700" onClick={async () => { try { await localServices.files.download(file) } catch (cause) { toast.error(cause instanceof Error ? cause.message : "다운로드 실패") } }}><Download />원본 다운로드</Button></div> : !url ? <p className="text-sm text-slate-400">불러오는 중…</p> : kind === "image" ? <img src={url} alt={file.name} className={`${imageHeight} w-auto rounded-lg object-contain shadow-sm`} /> : <iframe src={url} title={file.name} className={`${frameHeight} w-full rounded-lg border border-slate-200 bg-white`} />}</div>
+}
+
+function FilePreviewDialog({ file, onOpenChange }: { file: EvidenceFile; onOpenChange: (open: boolean) => void }) {
+  return <Dialog open onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-[min(960px,calc(100vw-2rem))]"><DialogHeader className="border-b border-slate-200 px-6 py-4 text-left"><DialogTitle className="truncate pr-8 text-lg">{file.name}</DialogTitle><DialogDescription>{formatBytes(file.size)} · 목업에서는 브라우저에 저장된 원본을 그대로 보여줍니다.</DialogDescription></DialogHeader><FilePreviewBody key={file.id} file={file} /></DialogContent></Dialog>
+}
+
+function FilePreviewPane({ file, onClose }: { file: EvidenceFile; onClose: () => void }) {
+  const remove = async () => {
+    if (!window.confirm(`'${file.name}' 파일을 삭제할까요? 이 자료를 사용하는 모든 프로젝트에서도 제거됩니다.`)) return
+    try {
+      await localServices.files.remove(file)
+      onClose()
+      toast.success(`${file.name}을 삭제했어요.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "삭제에 실패했습니다.")
+    }
+  }
+  return <section className="pane bg-slate-100"><div className="pane-heading bg-white"><div className="min-w-0"><p className="pane-kicker text-blue-600">ATTACHMENT</p><p className="truncate font-bold">{file.name}</p></div><div className="flex shrink-0 items-center gap-1"><button className="icon-button" title="다운로드" onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }}><Download className="size-4" /></button><button className="icon-button text-rose-500 hover:bg-rose-50 hover:text-rose-600" title="삭제" onClick={remove}><Trash2 className="size-4" /></button><button className="icon-button" title="닫고 자소서로 돌아가기" onClick={onClose}><X className="size-4" /></button></div></div><FilePreviewBody key={file.id} file={file} fillHeight /><div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-400"><span>{formatBytes(file.size)} · 첨부 자료를 열람 중입니다. 자소서 문항을 선택하면 편집기로 돌아갑니다.</span><ExtractionBadge status={file.extractionStatus} /></div></section>
+}
+
+function ExtractionBadge({ status }: { status?: EvidenceFile["extractionStatus"] }) {
+  const map: Record<NonNullable<EvidenceFile["extractionStatus"]>, { label: string; className: string }> = {
+    pending: { label: "AI 컨텍스트 추출 중…", className: "bg-slate-100 text-slate-500" },
+    done: { label: "AI 컨텍스트 준비됨", className: "bg-emerald-50 text-emerald-700" },
+    unsupported: { label: "AI 컨텍스트 미지원", className: "bg-amber-50 text-amber-700" },
+    failed: { label: "AI 컨텍스트 추출 실패", className: "bg-rose-50 text-rose-700" },
+  }
+  const info = status ? map[status] : null
+  if (!info) return null
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${info.className}`}>{info.label}</span>
 }
 
 function ProjectCard({ project, onOpen, onEdit }: { project: Project; onOpen: () => void; onEdit: () => void }) {
@@ -107,6 +181,7 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
   const project = state.projects.find((item) => item.id === projectId)
   const [mobilePane, setMobilePane] = useState<"files" | "editor" | "chat">("editor")
   const [selectedEssayId, setSelectedEssayId] = useState(state.essays[projectId]?.[0]?.id ?? "")
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(false)
@@ -114,12 +189,15 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
   if (!project) return <NotFound />
   const essays = state.essays[projectId] ?? []
   const selectedEssay = essays.find((essay) => essay.id === selectedEssayId) ?? essays[0]
+  const selectedFile = selectedFileId ? state.files.find((file) => file.id === selectedFileId && project.fileIds.includes(file.id)) : undefined
   const activeSuggestion = proposalRef ? state.chats[projectId]?.find((session) => session.id === proposalRef.sessionId)?.messages.find((message) => message.id === proposalRef.messageId)?.suggestions?.find((suggestion) => suggestion.id === proposalRef.suggestionId) : undefined
   const hasPendingChanges = activeSuggestion?.changeStatuses ? activeSuggestion.changeStatuses.includes("pending") : activeSuggestion?.status === "pending"
-  const createEssay = () => { const essay = localServices.essays.create(project.id); setProposalRef(null); setSelectedEssayId(essay.id); setMobilePane("editor") }
-  const previewSuggestion = (reference: ProposalRef & { essayId: string }) => { setSelectedEssayId(reference.essayId); setProposalRef(reference); setMobilePane("editor") }
-  const filePane = <FilePane state={state} project={project} essays={essays} selectedEssayId={selectedEssay?.id ?? ""} onSelectEssay={(essayId) => { setProposalRef(null); setSelectedEssayId(essayId); setMobilePane("editor") }} onCreateEssay={createEssay} onManageFiles={() => setFilesOpen(true)} />
-  const editorPane = selectedEssay ? <EditorPane key={selectedEssay.id} project={project} essay={selectedEssay} review={activeSuggestion && proposalRef && hasPendingChanges ? { reference: proposalRef, suggestion: activeSuggestion } : undefined} onReviewComplete={() => setProposalRef(null)} /> : <EmptyEssay onCreate={createEssay} />
+  const selectEssay = (essayId: string) => { setProposalRef(null); setSelectedFileId(null); setSelectedEssayId(essayId); setMobilePane("editor") }
+  const createEssay = () => { const essay = localServices.essays.create(project.id); setProposalRef(null); setSelectedFileId(null); setSelectedEssayId(essay.id); setMobilePane("editor") }
+  const selectFile = (fileId: string) => { setProposalRef(null); setSelectedFileId(fileId); setMobilePane("editor") }
+  const previewSuggestion = (reference: ProposalRef & { essayId: string }) => { setSelectedFileId(null); setSelectedEssayId(reference.essayId); setProposalRef(reference); setMobilePane("editor") }
+  const filePane = <FilePane state={state} project={project} essays={essays} selectedEssayId={selectedFile ? "" : selectedEssay?.id ?? ""} selectedFileId={selectedFile?.id ?? null} onSelectEssay={selectEssay} onSelectFile={selectFile} onCreateEssay={createEssay} onManageFiles={() => setFilesOpen(true)} />
+  const editorPane = selectedFile ? <FilePreviewPane file={selectedFile} onClose={() => setSelectedFileId(null)} /> : selectedEssay ? <EditorPane key={selectedEssay.id} project={project} essay={selectedEssay} review={activeSuggestion && proposalRef && hasPendingChanges ? { reference: proposalRef, suggestion: activeSuggestion } : undefined} onReviewComplete={() => setProposalRef(null)} /> : <EmptyEssay onCreate={createEssay} />
   const chatPane = <ChatPane state={state} project={project} essayId={selectedEssay?.id} onPreviewSuggestion={previewSuggestion} />
   const closeAnalysis = (open: boolean) => setAnalysisOpen(open)
   return <main className="workspace-shell"><div className="workspace-topbar"><button onClick={() => router.push("/hub")} className="icon-button"><ArrowLeft className="size-4" /></button><div className="min-w-0"><p className="truncate text-sm font-bold">{project.company} · {project.title}</p><p className="text-xs text-slate-400">{project.role}</p></div><button onClick={() => setEditOpen(true)} className="icon-button" title="프로젝트 정보 수정"><Pencil className="size-4" /></button><div className="ml-auto flex items-center gap-2"><button className="dashboard-link" onClick={() => setAnalysisOpen(true)}><BarChart3 className="size-4" /><span className="hidden sm:inline">AI 분석</span></button><StatusSelect project={project} /></div></div><div className="mobile-tabs"><button className={mobilePane === "files" ? "active" : ""} onClick={() => setMobilePane("files")}><FolderOpen />파일</button><button className={mobilePane === "editor" ? "active" : ""} onClick={() => setMobilePane("editor")}><FileText />작성</button><button className={mobilePane === "chat" ? "active" : ""} onClick={() => setMobilePane("chat")}><MessageSquareText />AI 코치</button></div><div className="hidden min-h-0 flex-1 lg:block"><ResizablePanelGroup orientation="horizontal"><ResizablePanel defaultSize={20} minSize={15}>{filePane}</ResizablePanel><ResizableHandle withHandle /><ResizablePanel defaultSize={52} minSize={35}>{editorPane}</ResizablePanel><ResizableHandle withHandle /><ResizablePanel defaultSize={28} minSize={20}>{chatPane}</ResizablePanel></ResizablePanelGroup></div><div className="min-h-0 flex-1 lg:hidden">{mobilePane === "files" && filePane}{mobilePane === "editor" && editorPane}{mobilePane === "chat" && chatPane}</div>{editOpen && <ProjectDialog open={editOpen} onOpenChange={setEditOpen} state={state} project={project} />}{filesOpen && <ManageFilesDialog open={filesOpen} onOpenChange={setFilesOpen} state={state} project={project} />}{analysisOpen && <AnalysisDialog open={analysisOpen} onOpenChange={closeAnalysis} state={state} project={project} />}</main>
@@ -129,9 +207,9 @@ function StatusSelect({ project }: { project: Project }) {
   return <select aria-label="지원 결과" className={`status-select status-${project.status}`} value={project.status} onChange={(event) => { const next = event.target.value as ApplicationStatus; const reward = next !== "pending" && !project.resultRewarded; localServices.projects.updateStatus(project.id, next); if (reward) toast.success("결과 기여 보상 500 크레딧이 지급됐어요.") }}><option value="pending">대기중</option><option value="passed">합격</option><option value="failed">불합격</option></select>
 }
 
-function FilePane({ state, project, essays, selectedEssayId, onSelectEssay, onCreateEssay, onManageFiles }: { state: AppState; project: Project; essays: Essay[]; selectedEssayId: string; onSelectEssay: (id: string) => void; onCreateEssay: () => void; onManageFiles: () => void }) {
+function FilePane({ state, project, essays, selectedEssayId, selectedFileId, onSelectEssay, onSelectFile, onCreateEssay, onManageFiles }: { state: AppState; project: Project; essays: Essay[]; selectedEssayId: string; selectedFileId: string | null; onSelectEssay: (id: string) => void; onSelectFile: (id: string) => void; onCreateEssay: () => void; onManageFiles: () => void }) {
   const files = state.files.filter((file) => project.fileIds.includes(file.id))
-  return <section className="pane bg-slate-950 text-slate-200"><div className="pane-heading border-slate-800"><div><p className="pane-kicker">EXPLORER</p><h2 className="font-bold">프로젝트 파일</h2></div></div><div className="min-h-0 flex-1 overflow-y-auto p-2"><div className="mb-1 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />COVER LETTER</span><button onClick={onCreateEssay} className="dark-icon-button" title="자소서 문항 추가"><Plus className="size-4" /></button></div>{essays.map((essay) => <button key={essay.id} onClick={() => onSelectEssay(essay.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${selectedEssayId === essay.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><FileText className="size-4 shrink-0" /><span className="truncate">{essay.title}</span></button>)}<div className="mb-1 mt-5 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />ATTACHMENTS</span><button onClick={onManageFiles} className="dark-icon-button" title="허브 자료 선택 또는 업로드"><Paperclip className="size-4" /></button></div>{files.length ? files.map((file) => <button key={file.id} onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-slate-300 hover:bg-slate-800 hover:text-white"><Paperclip className="size-4 shrink-0 text-blue-400" /><span className="truncate">{file.name}</span></button>) : <p className="px-3 py-5 text-center text-xs leading-5 text-slate-500">연결된 증빙 자료가 없습니다.<br />클립 버튼으로 허브 자료를 선택하세요.</p>}</div><div className="border-t border-slate-800 p-4 text-xs leading-5 text-slate-500">문항별 파일을 선택하면 중앙 에디터에서 각각 작성할 수 있습니다.</div></section>
+  return <section className="pane bg-slate-950 text-slate-200"><div className="pane-heading border-slate-800"><div><p className="pane-kicker">EXPLORER</p><h2 className="font-bold">프로젝트 파일</h2></div></div><div className="min-h-0 flex-1 overflow-y-auto p-2"><div className="mb-1 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />COVER LETTER</span><button onClick={onCreateEssay} className="dark-icon-button" title="자소서 문항 추가"><Plus className="size-4" /></button></div>{essays.map((essay) => <button key={essay.id} onClick={() => onSelectEssay(essay.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${selectedEssayId === essay.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><FileText className="size-4 shrink-0" /><span className="truncate">{essay.title}</span></button>)}<div className="mb-1 mt-5 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />ATTACHMENTS</span><button onClick={onManageFiles} className="dark-icon-button" title="허브 자료 선택 또는 업로드"><Paperclip className="size-4" /></button></div>{files.length ? files.map((file) => <button key={file.id} onClick={() => onSelectFile(file.id)} title="가운데 패널에서 열람" className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${selectedFileId === file.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><Paperclip className={`size-4 shrink-0 ${selectedFileId === file.id ? "text-white" : "text-blue-400"}`} /><span className="truncate">{file.name}</span></button>) : <p className="px-3 py-5 text-center text-xs leading-5 text-slate-500">연결된 증빙 자료가 없습니다.<br />클립 버튼으로 허브 자료를 선택하세요.</p>}</div><div className="border-t border-slate-800 p-4 text-xs leading-5 text-slate-500">첨부 자료를 클릭하면 가운데 패널에서 열람하고, 문항을 선택하면 편집기로 돌아갑니다.</div></section>
 }
 
 function EditorPane({ project, essay, review, onReviewComplete }: { project: Project; essay: Essay; review?: { reference: ProposalRef; suggestion: EssaySuggestion }; onReviewComplete: () => void }) {
@@ -201,7 +279,7 @@ function ChatPane({ state, project, essayId, onPreviewSuggestion }: { state: App
     setPrompt("")
     setContextIds([])
   }
-  const send = () => {
+  const send = async () => {
     if (!prompt.trim()) return
     let sessionId = activeSessionId
     if (!sessionId) {
@@ -210,11 +288,12 @@ function ChatPane({ state, project, essayId, onPreviewSuggestion }: { state: App
       setActiveSessionId(session.id)
     }
     const contexts = contextIds.length ? contextIds : essayId ? [`essay:${essayId}`] : []
-    const result = localServices.sendChat(project.id, sessionId, prompt.trim(), contexts)
-    if (!result.ok) return toast.error(result.error)
-    if (result.preview) onPreviewSuggestion({ sessionId, ...result.preview })
+    const promptText = prompt.trim()
     setPrompt("")
     setContextIds([])
+    const result = await localServices.sendChat(project.id, sessionId, promptText, contexts)
+    if (!result.ok) return toast.error(result.error)
+    if (result.preview) onPreviewSuggestion({ sessionId, ...result.preview })
   }
   return <section className="pane bg-white"><div className="pane-heading"><div className="min-w-0"><div className="flex items-center gap-2"><div className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-600 text-white"><Sparkles className="size-4" /></div><h2 className="truncate font-bold">{historyOpen ? "대화 기록" : activeSession?.title ?? "AI 커리어 코치"}</h2></div><p className="mt-1 truncate text-xs text-slate-400">{historyOpen ? `${sessions.length}개의 저장된 대화` : "여러 파일을 검토하고 수정안을 제안해요 · 10 크레딧"}</p></div><div className="flex gap-1"><button onClick={() => setHistoryOpen(!historyOpen)} className={`icon-button ${historyOpen ? "border-blue-200 bg-blue-50 text-blue-700" : ""}`} title="대화 기록"><History className="size-4" /></button><button onClick={startNewChat} className="icon-button" title="새 대화"><Plus className="size-4" /></button></div></div>{historyOpen ? <ChatHistory sessions={sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => { setActiveSessionId(sessionId); setHistoryOpen(false) }} onNew={startNewChat} /> : <><div className="chat-scroll">{messages.length ? messages.map((message) => <div key={message.id} className={`chat-message ${message.role}`}><span>{message.role === "assistant" ? "AI 코치" : "나"}</span><p>{message.content}</p>{message.references?.length ? <div className="mt-2 flex flex-wrap gap-1">{message.references.map((name) => <span key={name} className="context-chip">@{name}</span>)}</div> : null}{message.reasoning?.length ? <details className="reasoning-panel" open><summary>검토 과정 보기</summary><ol>{message.reasoning.map((step, index) => <li key={step}><span>{index + 1}</span>{step}</li>)}</ol></details> : null}{message.suggestions?.map((suggestion) => <SuggestionCard key={suggestion.id} sessionId={activeSessionId} messageId={message.id} suggestion={suggestion} onPreview={onPreviewSuggestion} />)}</div>) : <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700"><strong className="mb-1 block text-blue-700">새 대화를 시작해 보세요</strong>@를 입력해 여러 문항이나 자료를 태그하고 수정 방향을 알려주세요. 원문은 사용자가 제안을 승인하기 전까지 바뀌지 않습니다.</div>}<div className="mt-3 flex flex-wrap gap-2">{["성과를 수치 중심으로 다듬어줘", "직무와 연결해 수정해줘", "모든 문항의 어조를 통일해줘"].map((text) => <button key={text} onClick={() => setPrompt(text)} className="prompt-chip">{text}</button>)}</div></div><div className="border-t border-slate-200 p-3">{selectedContexts.length ? <div className="mb-2 flex flex-wrap gap-1">{selectedContexts.map((item) => <button key={item.id} onClick={() => setContextIds((current) => current.filter((id) => id !== item.id))} className="context-chip">@{item.name} ×</button>)}</div> : null}<div className="relative"><div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-400">{mentionCandidates.length ? <div className="mention-menu">{mentionCandidates.map((item) => <button key={item.id} onClick={() => chooseContext(item.id, item.name)}><span className="grid size-7 place-items-center rounded-lg bg-blue-50 text-blue-600">{item.kind === "자소서" ? <FileText className="size-4" /> : <Paperclip className="size-4" />}</span><span><strong>{item.name}</strong><small>{item.kind}</small></span></button>)}</div> : null}<textarea rows={2} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send() } }} placeholder="@로 파일을 태그하고 수정 방향을 알려주세요" className="min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none" /><button onClick={send} className="grid size-10 shrink-0 place-items-center rounded-lg bg-blue-600 text-white hover:bg-blue-700" aria-label="메시지 보내기"><Send className="size-4" /></button></div></div></div></>}</section>
 }
@@ -260,6 +339,7 @@ function ReportContent({ report }: { report: AppState["reports"][number] }) {
 function ReportSection({ title, tone, items }: { title: string; tone: "good" | "warn" | "action"; items: string[] }) { return <div className="surface-card p-5"><h3 className="font-bold">{title}</h3><ul className="mt-3 space-y-2">{items.map((item) => <li key={item} className="flex gap-3 text-sm leading-6 text-slate-600"><span className={`mt-2 size-1.5 shrink-0 rounded-full report-dot-${tone}`} />{item}</li>)}</ul></div> }
 
 function ContributePage({ state }: { state: AppState }) {
+  const router = useRouter()
   const emptyForm = { company: "", role: "", applicationPeriod: "", result: "passed" as "passed" | "failed", questions: [{ question: "", answer: "" }] }
   const [form, setForm] = useState(emptyForm)
   const updateQuestion = (index: number, field: "question" | "answer", value: string) => setForm({ ...form, questions: form.questions.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) })
@@ -271,7 +351,26 @@ function ContributePage({ state }: { state: AppState }) {
     setForm(emptyForm)
     toast.success("기여가 완료되어 500 크레딧을 받았어요!")
   }
-  return <main className="page-wrap max-w-5xl"><section className="mb-8"><p className="eyebrow">DATA CONTRIBUTION</p><h1 className="page-title">과거 자소서로 크레딧 받기</h1><p className="page-subtitle">합격·불합격 결과를 공유하면 더 나은 분석 데이터를 만들고 500 크레딧을 받아요.</p></section><div className="grid gap-6 lg:grid-cols-[1fr_320px]"><form onSubmit={submit} className="surface-card space-y-6 p-6"><div className="grid gap-4 sm:grid-cols-2"><FormField label="회사명 *" value={form.company} onChange={(company) => setForm({ ...form, company })} placeholder="지원했던 회사" /><FormField label="지원 직무 *" value={form.role} onChange={(role) => setForm({ ...form, role })} placeholder="지원했던 직무" /><label><span className="form-label">지원 시기 *</span><input className="text-input" type="month" value={form.applicationPeriod} onChange={(event) => setForm({ ...form, applicationPeriod: event.target.value })} /></label><div><span className="form-label">지원 결과 *</span><div className="grid grid-cols-2 gap-2">{(["passed", "failed"] as const).map((result) => <button key={result} type="button" onClick={() => setForm({ ...form, result })} className={`result-option h-11 ${form.result === result ? "selected" : ""}`}><span className={`status status-${result}`}>{statusLabel[result]}</span>{form.result === result && <Check className="size-4 text-blue-600" />}</button>)}</div></div></div><div className="space-y-4"><div className="flex items-center justify-between"><div><h2 className="font-bold">자기소개서 문항</h2><p className="mt-1 text-xs text-slate-400">실제 제출했던 질문과 답변을 문항별로 입력하세요.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setForm({ ...form, questions: [...form.questions, { question: "", answer: "" }] })}><Plus />문항 추가</Button></div>{form.questions.map((item, index) => <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">문항 {index + 1}</strong>{form.questions.length > 1 && <button type="button" onClick={() => setForm({ ...form, questions: form.questions.filter((_, itemIndex) => itemIndex !== index) })} className="text-xs font-bold text-rose-600">삭제</button>}</div><label><span className="form-label">질문 *</span><textarea className="question-editor bg-white" value={item.question} onChange={(event) => updateQuestion(index, "question", event.target.value)} placeholder="예: 지원 동기와 입사 후 목표를 작성해 주세요." /></label><label className="mt-3 block"><span className="form-label">답변 *</span><textarea className="contribution-editor min-h-52 bg-white" value={item.answer} onChange={(event) => updateQuestion(index, "answer", event.target.value)} placeholder="제출했던 답변을 입력해 주세요." /><span className="mt-2 block text-right text-xs text-slate-400">{item.answer.trim().length} / 최소 100자</span></label></div>)}</div><Button type="submit" className="h-12 w-full bg-blue-600 text-base hover:bg-blue-700">제출하고 500 크레딧 받기</Button></form><aside className="space-y-4"><div className="rounded-2xl bg-slate-950 p-6 text-white"><Coins className="size-8 text-amber-400" /><p className="mt-5 text-sm text-slate-400">현재 보유 크레딧</p><p className="mt-1 text-3xl font-bold">{state.creditBalance.toLocaleString()}</p><p className="mt-5 border-t border-slate-800 pt-5 text-sm leading-6 text-slate-400">기여 1건마다 500 크레딧이 즉시 지급됩니다.</p></div><div className="surface-card p-5"><h2 className="font-bold">데이터는 이렇게 사용돼요</h2><ul className="mt-3 space-y-3 text-sm leading-6 text-slate-500"><li>• 개인을 특정하는 정보는 분석 전에 제거합니다.</li><li>• 유사 지원자의 강점과 취약점을 찾는 데 활용합니다.</li><li>• 이 목업에서는 외부 서버로 전송되지 않습니다.</li></ul></div></aside></div></main>
+  return <main className="page-wrap max-w-5xl"><section className="mb-8"><p className="eyebrow">DATA CONTRIBUTION</p><h1 className="page-title">과거 자소서로 크레딧 받기</h1><p className="page-subtitle">합격·불합격 결과를 공유하면 더 나은 분석 데이터를 만들고 500 크레딧을 받아요.</p></section><div className="grid gap-6 lg:grid-cols-[1fr_320px]"><form onSubmit={submit} className="surface-card space-y-6 p-6"><div className="grid gap-4 sm:grid-cols-2"><FormField label="회사명 *" value={form.company} onChange={(company) => setForm({ ...form, company })} placeholder="지원했던 회사" /><FormField label="지원 직무 *" value={form.role} onChange={(role) => setForm({ ...form, role })} placeholder="지원했던 직무" /><label><span className="form-label">지원 시기 *</span><input className="text-input" type="month" value={form.applicationPeriod} onChange={(event) => setForm({ ...form, applicationPeriod: event.target.value })} /></label><div><span className="form-label">지원 결과 *</span><div className="grid grid-cols-2 gap-2">{(["passed", "failed"] as const).map((result) => <button key={result} type="button" onClick={() => setForm({ ...form, result })} className={`result-option h-11 ${form.result === result ? "selected" : ""}`}><span className={`status status-${result}`}>{statusLabel[result]}</span>{form.result === result && <Check className="size-4 text-blue-600" />}</button>)}</div></div></div><div className="space-y-4"><div className="flex items-center justify-between"><div><h2 className="font-bold">자기소개서 문항</h2><p className="mt-1 text-xs text-slate-400">실제 제출했던 질문과 답변을 문항별로 입력하세요.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setForm({ ...form, questions: [...form.questions, { question: "", answer: "" }] })}><Plus />문항 추가</Button></div>{form.questions.map((item, index) => <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">문항 {index + 1}</strong>{form.questions.length > 1 && <button type="button" onClick={() => setForm({ ...form, questions: form.questions.filter((_, itemIndex) => itemIndex !== index) })} className="text-xs font-bold text-rose-600">삭제</button>}</div><label><span className="form-label">질문 *</span><textarea className="question-editor bg-white" value={item.question} onChange={(event) => updateQuestion(index, "question", event.target.value)} placeholder="예: 지원 동기와 입사 후 목표를 작성해 주세요." /></label><label className="mt-3 block"><span className="form-label">답변 *</span><textarea className="contribution-editor min-h-52 bg-white" value={item.answer} onChange={(event) => updateQuestion(index, "answer", event.target.value)} placeholder="제출했던 답변을 입력해 주세요." /><span className="mt-2 block text-right text-xs text-slate-400">{item.answer.trim().length} / 최소 100자</span></label></div>)}</div><Button type="submit" className="h-12 w-full bg-blue-600 text-base hover:bg-blue-700">제출하고 500 크레딧 받기</Button></form><aside className="space-y-4"><div className="rounded-2xl bg-slate-950 p-6 text-white"><Coins className="size-8 text-amber-400" /><p className="mt-5 text-sm text-slate-400">현재 보유 크레딧</p><p className="mt-1 text-3xl font-bold">{state.creditBalance.toLocaleString()}</p><Button onClick={() => router.push("/credits")} className="mt-4 w-full bg-blue-600 hover:bg-blue-700"><CreditCard />크레딧 충전</Button><p className="mt-5 border-t border-slate-800 pt-5 text-sm leading-6 text-slate-400">기여 1건마다 500 크레딧이 즉시 지급됩니다.</p></div><div className="surface-card p-5"><h2 className="font-bold">데이터는 이렇게 사용돼요</h2><ul className="mt-3 space-y-3 text-sm leading-6 text-slate-500"><li>• 개인을 특정하는 정보는 분석 전에 제거합니다.</li><li>• 유사 지원자의 강점과 취약점을 찾는 데 활용합니다.</li><li>• 이 목업에서는 외부 서버로 전송되지 않습니다.</li></ul></div></aside></div></main>
+}
+
+const creditPacks = [
+  { credits: 1000, price: "5,000원", tag: "" },
+  { credits: 3000, price: "13,500원", tag: "10% 추가" },
+  { credits: 6000, price: "24,000원", tag: "인기" },
+  { credits: 12000, price: "42,000원", tag: "20% 추가" },
+]
+
+function CreditChargePage({ state }: { state: AppState }) {
+  const router = useRouter()
+  const [selected, setSelected] = useState(creditPacks[1].credits)
+  const charge = () => {
+    const pack = creditPacks.find((item) => item.credits === selected)
+    if (!pack) return
+    localServices.credits.charge(pack.credits, "크레딧 충전")
+    toast.success(`${pack.credits.toLocaleString()} 크레딧을 충전했어요.`)
+  }
+  return <main className="page-wrap max-w-4xl"><button onClick={() => router.back()} className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4" />돌아가기</button><section className="mb-8"><p className="eyebrow">CREDIT</p><h1 className="page-title">크레딧 충전</h1><p className="page-subtitle">AI 코치와 분석 기능에 사용할 크레딧을 충전하세요.</p></section><div className="grid gap-6 lg:grid-cols-[1fr_320px]"><div className="surface-card p-6"><div className="grid gap-3 sm:grid-cols-2">{creditPacks.map((pack) => <button key={pack.credits} type="button" onClick={() => setSelected(pack.credits)} className={`relative rounded-2xl border p-5 text-left transition ${selected === pack.credits ? "border-blue-500 bg-blue-50/60 ring-2 ring-blue-500/20" : "border-slate-200 hover:border-blue-200 hover:bg-slate-50"}`}>{pack.tag && <span className="absolute right-4 top-4 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">{pack.tag}</span>}<div className="flex items-center gap-2 text-blue-600"><Coins className="size-5" /><strong className="text-2xl tracking-tight text-slate-950">{pack.credits.toLocaleString()}</strong><span className="text-sm font-semibold text-slate-500">크레딧</span></div><p className="mt-3 text-sm font-bold text-slate-700">{pack.price}</p></button>)}</div><Button onClick={charge} className="mt-6 h-12 w-full bg-blue-600 text-base hover:bg-blue-700"><CreditCard />{selected.toLocaleString()} 크레딧 충전하기</Button><p className="mt-4 text-center text-xs leading-5 text-slate-400">목업에서는 실제 결제가 이뤄지지 않고 즉시 잔액에 반영됩니다.</p></div><aside className="space-y-4"><div className="rounded-2xl bg-slate-950 p-6 text-white"><Coins className="size-8 text-amber-400" /><p className="mt-5 text-sm text-slate-400">현재 보유 크레딧</p><p className="mt-1 text-3xl font-bold">{state.creditBalance.toLocaleString()}</p><p className="mt-5 border-t border-slate-800 pt-5 text-sm leading-6 text-slate-400">AI 코치 10 · AI 분석 100 크레딧이 사용됩니다.</p></div><div className="surface-card p-5"><h2 className="font-bold">크레딧이 부족하다면</h2><p className="mt-3 text-sm leading-6 text-slate-500">과거 자소서 결과를 기여하면 1건당 500 크레딧을 무료로 받을 수 있어요.</p><Button variant="outline" className="mt-4 w-full" onClick={() => router.push("/contribute")}><FilePlus2 />자소서 기여하고 받기</Button></div></aside></div></main>
 }
 
 function NotFound() { const router = useRouter(); return <main className="grid min-h-[70vh] place-items-center text-center"><div><h1 className="text-2xl font-bold">프로젝트를 찾을 수 없어요</h1><Button className="mt-4" onClick={() => router.push("/hub")}>허브로 이동</Button></div></main> }
