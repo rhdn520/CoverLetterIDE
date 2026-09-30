@@ -164,7 +164,7 @@ button {
   .status-pending { @apply bg-amber-50 text-amber-700; }
   .status-passed { @apply bg-emerald-50 text-emerald-700; }
   .status-failed { @apply bg-rose-50 text-rose-700; }
-  .workspace-shell { @apply flex h-[calc(100vh-64px)] min-h-[620px] flex-col overflow-hidden bg-slate-100; }
+  .workspace-shell { @apply flex h-screen min-h-[620px] flex-col overflow-hidden bg-slate-100; }
   .workspace-topbar { @apply flex h-16 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 sm:px-5; }
   .dashboard-link { @apply flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100 sm:text-sm; }
   .status-select { @apply h-9 rounded-lg border-0 px-3 text-xs font-bold outline-none sm:text-sm; }

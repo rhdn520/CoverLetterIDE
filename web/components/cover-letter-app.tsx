@@ -41,6 +41,7 @@ export function CoverLetterApp() {
   const state = useAppState()
   const pathname = usePathname()
   const router = useRouter()
+  const isWorkspace = /^\/projects\/[^/]+\/workspace$/.test(pathname)
   useEffect(() => { if (state && !state.user && pathname !== "/login" && pathname !== "/") router.replace("/login") }, [state, pathname, router])
   if (!state) return <div className="grid min-h-screen place-items-center bg-slate-950 text-slate-300">워크스페이스를 불러오는 중…</div>
   if (!state.user || pathname === "/login" || pathname === "/") return <LoginPage />
@@ -52,7 +53,7 @@ export function CoverLetterApp() {
   if (pathname === "/credits") page = <CreditChargePage state={state} />
   if (workspace) page = <WorkspacePage state={state} projectId={workspace[1]} />
   if (dashboard) page = <LegacyDashboardRoute state={state} projectId={dashboard[1]} />
-  return <div className="min-h-screen bg-slate-50 text-slate-950"><AppHeader state={state} />{page}<Toaster position="bottom-right" /></div>
+  return <div className="min-h-screen bg-slate-50 text-slate-950">{!isWorkspace && <AppHeader state={state} />}{page}<Toaster position="bottom-right" /></div>
 }
 
 function LoginPage() {
