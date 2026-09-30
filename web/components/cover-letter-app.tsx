@@ -1,11 +1,11 @@
 "use client"
 
-import { FormEvent, useEffect, useRef, useState } from "react"
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   ArrowLeft, Award, BarChart3, BriefcaseBusiness, CalendarDays, Check, ChevronRight,
   Coins, CreditCard, Download, Eye, FilePlus2, FileText, FolderOpen, GraduationCap, LayoutDashboard,
-  History, LogOut, MessageSquareText, Paperclip, Pencil, Plus, Send, Sparkles, Trash2, Upload, X,
+  History, LogOut, MessageSquareText, Paperclip, Pencil, Plus, Redo2, Send, Sparkles, Trash2, Undo2, Upload, X,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -48,6 +48,7 @@ export function CoverLetterApp() {
   const dashboard = pathname.match(/^\/projects\/([^/]+)\/dashboard$/)
   let page = <HubPage state={state} />
   if (pathname === "/contribute") page = <ContributePage state={state} />
+  if (pathname === "/contributions") page = <ContributionHistoryPage state={state} />
   if (pathname === "/credits") page = <CreditChargePage state={state} />
   if (workspace) page = <WorkspacePage state={state} projectId={workspace[1]} />
   if (dashboard) page = <LegacyDashboardRoute state={state} projectId={dashboard[1]} />
@@ -161,9 +162,25 @@ function ProjectCard({ project, onOpen, onEdit }: { project: Project; onOpen: ()
 
 function ProjectDialog({ open, onOpenChange, state, project }: { open: boolean; onOpenChange: (open: boolean) => void; state: AppState; project?: Project }) {
   const router = useRouter()
-  const [form, setForm] = useState({ company: project?.company ?? "", role: project?.role ?? "", title: project?.title ?? "", deadline: project?.deadline ?? "", fileIds: project?.fileIds ?? state.files.map((file) => file.id) })
-  const submit = (event: FormEvent) => { event.preventDefault(); if (!form.company.trim() || !form.role.trim() || !form.title.trim() || !form.deadline) return toast.error("필수 정보를 모두 입력해 주세요."); if (!project && daysLeft(form.deadline) < 0) return toast.error("오늘 이후의 마감일을 선택해 주세요."); if (project) { localServices.projects.update(project.id, form); localServices.projects.setFiles(project.id, form.fileIds); toast.success("프로젝트 정보를 수정했어요."); onOpenChange(false) } else { const created = localServices.projects.create(form); onOpenChange(false); router.push(`/projects/${created.id}/workspace`) } }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl"><DialogHeader><DialogTitle>{project ? "프로젝트 정보 수정" : "새 지원 프로젝트"}</DialogTitle><DialogDescription>{project ? "회사, 직무와 마감 정보를 변경할 수 있습니다." : "기업과 지원 정보를 입력하고 함께 사용할 자료를 선택하세요."}</DialogDescription></DialogHeader><form onSubmit={submit} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><FormField label="회사명 *" value={form.company} onChange={(company) => setForm({ ...form, company })} placeholder="예: 넥스트파이낸스" /><FormField label="지원 직무 *" value={form.role} onChange={(role) => setForm({ ...form, role })} placeholder="예: 서비스 기획" /><div className="sm:col-span-2"><FormField label="프로젝트명 *" value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="예: 2026 상반기 체험형 인턴" /></div><label className="sm:col-span-2"><span className="form-label">마감일 *</span><input className="text-input" type="date" value={form.deadline} onChange={(event) => setForm({ ...form, deadline: event.target.value })} /></label></div><div><p className="form-label">포함할 증빙 자료</p><p className="mb-2 text-xs text-slate-400">필요한 자료만 선택하세요.</p><div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2">{state.files.length ? state.files.map((file) => <label key={file.id} className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-slate-50"><Checkbox checked={form.fileIds.includes(file.id)} onCheckedChange={(checked) => setForm({ ...form, fileIds: checked ? [...form.fileIds, file.id] : form.fileIds.filter((fileId) => fileId !== file.id) })} /><FileText className="size-4 text-slate-400" /><span className="truncate text-sm font-semibold">{file.name}</span></label>) : <p className="p-3 text-center text-sm text-slate-400">선택할 자료가 없습니다.</p>}</div></div><DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>취소</Button><Button type="submit" className="bg-blue-600 hover:bg-blue-700">{project ? "수정 완료" : "프로젝트 만들기"}</Button></DialogFooter></form></DialogContent></Dialog>
+  const inputRef = useRef<HTMLInputElement>(null)
+  const initialForm = () => ({ company: project?.company ?? "", role: project?.role ?? "", title: project?.title ?? "", deadline: project?.deadline ?? "", fileIds: project?.fileIds ?? state.files.map((file) => file.id) })
+  const [form, setForm] = useState(initialForm)
+  // 모달을 닫을 때 입력 내용을 초기화해, 다시 열었을 때 이전에 쓰다 만 값이 남지 않게 한다.
+  const handleOpenChange = (next: boolean) => { if (!next) setForm(initialForm()); onOpenChange(next) }
+  const upload = async (files: FileList | null) => {
+    for (const file of Array.from(files ?? [])) {
+      try {
+        // 업로드한 파일은 허브 첨부 자료에 등록되고, 이 프로젝트에도 자동 포함된다.
+        const added = await localServices.files.add(file)
+        setForm((current) => ({ ...current, fileIds: [...current.fileIds, added.id] }))
+        toast.success(`${file.name}을 첨부했어요.`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "업로드 실패")
+      }
+    }
+  }
+  const submit = (event: FormEvent) => { event.preventDefault(); if (!form.company.trim() || !form.role.trim() || !form.title.trim() || !form.deadline) return toast.error("필수 정보를 모두 입력해 주세요."); if (!project && daysLeft(form.deadline) < 0) return toast.error("오늘 이후의 마감일을 선택해 주세요."); if (project) { localServices.projects.update(project.id, form); localServices.projects.setFiles(project.id, form.fileIds); toast.success("프로젝트 정보를 수정했어요."); handleOpenChange(false) } else { const created = localServices.projects.create(form); handleOpenChange(false); router.push(`/projects/${created.id}/workspace`) } }
+  return <Dialog open={open} onOpenChange={handleOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl"><DialogHeader><DialogTitle>{project ? "프로젝트 정보 수정" : "새 지원 프로젝트"}</DialogTitle><DialogDescription>{project ? "회사, 직무와 마감 정보를 변경할 수 있습니다." : "기업과 지원 정보를 입력하고 함께 사용할 자료를 선택하세요."}</DialogDescription></DialogHeader><form onSubmit={submit} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><FormField label="회사명 *" value={form.company} onChange={(company) => setForm({ ...form, company })} placeholder="예: 넥스트파이낸스" /><FormField label="지원 직무 *" value={form.role} onChange={(role) => setForm({ ...form, role })} placeholder="예: 서비스 기획" /><div className="sm:col-span-2"><FormField label="프로젝트명 *" value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="예: 2026 상반기 체험형 인턴" /></div><label className="sm:col-span-2"><span className="form-label">마감일 *</span><input className="text-input" type="date" value={form.deadline} onChange={(event) => setForm({ ...form, deadline: event.target.value })} /></label></div><div><div className="mb-2 flex items-center justify-between"><p className="form-label mb-0">포함할 첨부 자료</p><Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}><Upload />파일 첨부</Button></div><input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.hwpx" onChange={(event) => { upload(event.target.files); event.target.value = "" }} /><p className="mb-2 text-xs text-slate-400">필요한 자료만 선택하세요. 새로 첨부한 파일은 허브에도 등록됩니다.</p><div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-slate-200 p-2">{state.files.length ? state.files.map((file) => <label key={file.id} className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-slate-50"><Checkbox checked={form.fileIds.includes(file.id)} onCheckedChange={(checked) => setForm({ ...form, fileIds: checked ? [...form.fileIds, file.id] : form.fileIds.filter((fileId) => fileId !== file.id) })} /><FileText className="size-4 text-slate-400" /><span className="truncate text-sm font-semibold">{file.name}</span></label>) : <p className="p-3 text-center text-sm text-slate-400">첨부된 자료가 없습니다. ‘파일 첨부’로 추가하세요.</p>}</div></div><DialogFooter><Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>취소</Button><Button type="submit" className="bg-blue-600 hover:bg-blue-700">{project ? "수정 완료" : "프로젝트 만들기"}</Button></DialogFooter></form></DialogContent></Dialog>
 }
 
 function FormField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
@@ -195,8 +212,41 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
   const selectEssay = (essayId: string) => { setProposalRef(null); setSelectedFileId(null); setSelectedEssayId(essayId); setMobilePane("editor") }
   const createEssay = () => { const essay = localServices.essays.create(project.id); setProposalRef(null); setSelectedFileId(null); setSelectedEssayId(essay.id); setMobilePane("editor") }
   const selectFile = (fileId: string) => { setProposalRef(null); setSelectedFileId(fileId); setMobilePane("editor") }
+  const deleteEssay = (essayId: string) => {
+    const target = essays.find((essay) => essay.id === essayId)
+    if (!target) return
+    if (!window.confirm(`'${target.title}' 문항을 삭제할까요? 작성한 내용도 함께 사라집니다.`)) return
+    localServices.essays.remove(project.id, essayId)
+    if (selectedEssayId === essayId) {
+      const remaining = essays.filter((essay) => essay.id !== essayId)
+      setProposalRef(null)
+      setSelectedEssayId(remaining[0]?.id ?? "")
+    }
+    toast.success("문항을 삭제했어요.")
+  }
+  const deleteFile = async (fileId: string) => {
+    const target = state.files.find((file) => file.id === fileId)
+    if (!target) return
+    if (!window.confirm(`'${target.name}' 파일을 삭제할까요? 이 자료를 사용하는 모든 프로젝트에서도 제거됩니다.`)) return
+    try {
+      await localServices.files.remove(target)
+      if (selectedFileId === fileId) setSelectedFileId(null)
+      toast.success(`${target.name}을 삭제했어요.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "삭제에 실패했습니다.")
+    }
+  }
+  const contribute = () => {
+    // 현재 워크스페이스의 문항을 기여 폼 초안으로 넘긴다. 실제 크레딧 보상은 기여 페이지 제출 시 지급된다.
+    localServices.setContributionDraft({
+      company: project.company,
+      role: project.role,
+      questions: essays.map((essay) => ({ question: essay.question, answer: essay.answer })),
+    })
+    router.push("/contribute")
+  }
   const previewSuggestion = (reference: ProposalRef & { essayId: string }) => { setSelectedFileId(null); setSelectedEssayId(reference.essayId); setProposalRef(reference); setMobilePane("editor") }
-  const filePane = <FilePane state={state} project={project} essays={essays} selectedEssayId={selectedFile ? "" : selectedEssay?.id ?? ""} selectedFileId={selectedFile?.id ?? null} onSelectEssay={selectEssay} onSelectFile={selectFile} onCreateEssay={createEssay} onManageFiles={() => setFilesOpen(true)} />
+  const filePane = <FilePane state={state} project={project} essays={essays} selectedEssayId={selectedFile ? "" : selectedEssay?.id ?? ""} selectedFileId={selectedFile?.id ?? null} onSelectEssay={selectEssay} onSelectFile={selectFile} onCreateEssay={createEssay} onDeleteEssay={deleteEssay} onDeleteFile={deleteFile} onManageFiles={() => setFilesOpen(true)} onContribute={contribute} />
   const editorPane = selectedFile ? <FilePreviewPane file={selectedFile} onClose={() => setSelectedFileId(null)} /> : selectedEssay ? <EditorPane key={selectedEssay.id} project={project} essay={selectedEssay} review={activeSuggestion && proposalRef && hasPendingChanges ? { reference: proposalRef, suggestion: activeSuggestion } : undefined} onReviewComplete={() => setProposalRef(null)} /> : <EmptyEssay onCreate={createEssay} />
   const chatPane = <ChatPane state={state} project={project} essayId={selectedEssay?.id} onPreviewSuggestion={previewSuggestion} />
   const closeAnalysis = (open: boolean) => setAnalysisOpen(open)
@@ -204,30 +254,92 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
 }
 
 function StatusSelect({ project }: { project: Project }) {
-  return <select aria-label="지원 결과" className={`status-select status-${project.status}`} value={project.status} onChange={(event) => { const next = event.target.value as ApplicationStatus; const reward = next !== "pending" && !project.resultRewarded; localServices.projects.updateStatus(project.id, next); if (reward) toast.success("결과 기여 보상 500 크레딧이 지급됐어요.") }}><option value="pending">대기중</option><option value="passed">합격</option><option value="failed">불합격</option></select>
+  return <select aria-label="지원 결과" className={`status-select status-${project.status}`} value={project.status} onChange={(event) => { localServices.projects.updateStatus(project.id, event.target.value as ApplicationStatus) }}><option value="pending">대기중</option><option value="passed">합격</option><option value="failed">불합격</option></select>
 }
 
-function FilePane({ state, project, essays, selectedEssayId, selectedFileId, onSelectEssay, onSelectFile, onCreateEssay, onManageFiles }: { state: AppState; project: Project; essays: Essay[]; selectedEssayId: string; selectedFileId: string | null; onSelectEssay: (id: string) => void; onSelectFile: (id: string) => void; onCreateEssay: () => void; onManageFiles: () => void }) {
+function FilePane({ state, project, essays, selectedEssayId, selectedFileId, onSelectEssay, onSelectFile, onCreateEssay, onDeleteEssay, onDeleteFile, onManageFiles, onContribute }: { state: AppState; project: Project; essays: Essay[]; selectedEssayId: string; selectedFileId: string | null; onSelectEssay: (id: string) => void; onSelectFile: (id: string) => void; onCreateEssay: () => void; onDeleteEssay: (id: string) => void; onDeleteFile: (id: string) => void; onManageFiles: () => void; onContribute: () => void }) {
   const files = state.files.filter((file) => project.fileIds.includes(file.id))
-  return <section className="pane bg-slate-950 text-slate-200"><div className="pane-heading border-slate-800"><div><p className="pane-kicker">EXPLORER</p><h2 className="font-bold">프로젝트 파일</h2></div></div><div className="min-h-0 flex-1 overflow-y-auto p-2"><div className="mb-1 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />COVER LETTER</span><button onClick={onCreateEssay} className="dark-icon-button" title="자소서 문항 추가"><Plus className="size-4" /></button></div>{essays.map((essay) => <button key={essay.id} onClick={() => onSelectEssay(essay.id)} className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${selectedEssayId === essay.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><FileText className="size-4 shrink-0" /><span className="truncate">{essay.title}</span></button>)}<div className="mb-1 mt-5 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />ATTACHMENTS</span><button onClick={onManageFiles} className="dark-icon-button" title="허브 자료 선택 또는 업로드"><Paperclip className="size-4" /></button></div>{files.length ? files.map((file) => <button key={file.id} onClick={() => onSelectFile(file.id)} title="가운데 패널에서 열람" className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${selectedFileId === file.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><Paperclip className={`size-4 shrink-0 ${selectedFileId === file.id ? "text-white" : "text-blue-400"}`} /><span className="truncate">{file.name}</span></button>) : <p className="px-3 py-5 text-center text-xs leading-5 text-slate-500">연결된 증빙 자료가 없습니다.<br />클립 버튼으로 허브 자료를 선택하세요.</p>}</div><div className="border-t border-slate-800 p-4 text-xs leading-5 text-slate-500">첨부 자료를 클릭하면 가운데 패널에서 열람하고, 문항을 선택하면 편집기로 돌아갑니다.</div></section>
+  return <section className="pane bg-slate-950 text-slate-200"><div className="pane-heading border-slate-800"><div><p className="pane-kicker">EXPLORER</p><h2 className="font-bold">프로젝트 파일</h2></div></div><div className="min-h-0 flex-1 overflow-y-auto p-2"><div className="mb-1 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />COVER LETTER</span><button onClick={onCreateEssay} className="dark-icon-button" title="자소서 문항 추가"><Plus className="size-4" /></button></div>{essays.map((essay) => <div key={essay.id} className={`group flex items-center gap-1 rounded-lg pr-1 text-sm transition ${selectedEssayId === essay.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><button onClick={() => onSelectEssay(essay.id)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"><FileText className="size-4 shrink-0" /><span className="truncate">{essay.title}</span></button><button onClick={() => onDeleteEssay(essay.id)} title="문항 삭제" className="grid size-7 shrink-0 place-items-center rounded-md text-slate-400 opacity-0 transition hover:bg-rose-500/20 hover:text-rose-300 group-hover:opacity-100"><Trash2 className="size-3.5" /></button></div>)}<div className="mb-1 mt-5 flex items-center justify-between px-2 py-2 text-xs font-bold text-slate-500"><span className="flex items-center gap-2"><ChevronRight className="size-3 rotate-90" />ATTACHMENTS</span><button onClick={onManageFiles} className="dark-icon-button" title="허브 자료 선택 또는 업로드"><Paperclip className="size-4" /></button></div>{files.length ? files.map((file) => <div key={file.id} className={`group flex items-center gap-1 rounded-lg pr-1 text-sm transition ${selectedFileId === file.id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"}`}><button onClick={() => onSelectFile(file.id)} title="가운데 패널에서 열람" className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"><Paperclip className={`size-4 shrink-0 ${selectedFileId === file.id ? "text-white" : "text-blue-400"}`} /><span className="truncate">{file.name}</span></button><button onClick={() => onDeleteFile(file.id)} title="파일 삭제" className="grid size-7 shrink-0 place-items-center rounded-md text-slate-400 opacity-0 transition hover:bg-rose-500/20 hover:text-rose-300 group-hover:opacity-100"><Trash2 className="size-3.5" /></button></div>) : <p className="px-3 py-5 text-center text-xs leading-5 text-slate-500">연결된 첨부 자료가 없습니다.<br />클립 버튼으로 허브 자료를 선택하세요.</p>}</div><div className="space-y-3 border-t border-slate-800 p-3"><button onClick={onContribute} className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-blue-500 hover:bg-slate-800 hover:text-white"><FilePlus2 className="size-3.5" />이 자소서 기여하기</button><p className="text-[11px] leading-5 text-slate-500">문항·파일을 삭제하거나, 작성한 자소서를 기여 페이지로 보낼 수 있어요.</p></div></section>
+}
+
+type EssayDoc = { title: string; question: string; answer: string }
+
+/**
+ * 자소서 문서(title/question/answer)의 실행취소·재실행 히스토리를 관리한다.
+ * 짧은 시간 안의 연속 입력은 하나의 히스토리 항목으로 합쳐(coalesce) 문자 단위가
+ * 아니라 편집 묶음 단위로 되돌아가게 한다. 브라우저 기본 undo와 별개로 동작한다.
+ */
+function useDocumentHistory(initial: EssayDoc, coalesceMs = 500) {
+  const [hist, setHist] = useState<{ doc: EssayDoc; past: EssayDoc[]; future: EssayDoc[] }>({ doc: initial, past: [], future: [] })
+  const lastCommit = useRef(0)
+
+  const update = (patch: Partial<EssayDoc>) => {
+    const now = Date.now()
+    // 직전 커밋과의 간격이 짧으면 같은 편집으로 보고 히스토리를 새로 쌓지 않는다.
+    const coalesce = now - lastCommit.current <= coalesceMs
+    lastCommit.current = now
+    setHist((h) => ({
+      doc: { ...h.doc, ...patch },
+      past: coalesce ? h.past : [...h.past, h.doc],
+      future: [],
+    }))
+  }
+
+  const undo = () => {
+    lastCommit.current = 0
+    setHist((h) => h.past.length ? { doc: h.past[h.past.length - 1], past: h.past.slice(0, -1), future: [h.doc, ...h.future] } : h)
+  }
+
+  const redo = () => {
+    lastCommit.current = 0
+    setHist((h) => h.future.length ? { doc: h.future[0], past: [...h.past, h.doc], future: h.future.slice(1) } : h)
+  }
+
+  // 히스토리에 기록하며 문서를 교체한다(AI 제안 반영 등 외부 변경용).
+  const replace = (next: EssayDoc) => {
+    lastCommit.current = 0
+    setHist((h) => ({ doc: next, past: [...h.past, h.doc], future: [] }))
+  }
+
+  return { doc: hist.doc, update, undo, redo, replace, canUndo: hist.past.length > 0, canRedo: hist.future.length > 0 }
 }
 
 function EditorPane({ project, essay, review, onReviewComplete }: { project: Project; essay: Essay; review?: { reference: ProposalRef; suggestion: EssaySuggestion }; onReviewComplete: () => void }) {
-  const [title, setTitle] = useState(essay.title)
-  const [question, setQuestion] = useState(essay.question)
-  const [answer, setAnswer] = useState(essay.answer)
-  const changed = title !== essay.title || question !== essay.question || answer !== essay.answer
-  useEffect(() => { if (!changed) return; const timer = setTimeout(() => localServices.essays.save(project.id, essay.id, { title, question, answer }), 500); return () => clearTimeout(timer) }, [answer, changed, essay.id, project.id, question, title])
+  const history = useDocumentHistory({ title: essay.title, question: essay.question, answer: essay.answer })
+  const { title, question, answer } = history.doc
+  // 마지막으로 저장한 스냅샷. 저장이 전역 리렌더를 유발해 essay prop이 새 참조로
+  // 바뀌어도, 값이 같으면 다시 저장하지 않아 무한 저장 루프를 막는다.
+  const [saved, setSaved] = useState({ title: essay.title, question: essay.question, answer: essay.answer })
+  const dirty = title !== saved.title || question !== saved.question || answer !== saved.answer
+  const persist = useCallback(() => {
+    if (title === saved.title && question === saved.question && answer === saved.answer) return
+    localServices.essays.save(project.id, essay.id, { title, question, answer })
+    setSaved({ title, question, answer })
+  }, [answer, essay.id, project.id, question, saved.answer, saved.question, saved.title, title])
+  useEffect(() => {
+    if (!dirty) return
+    const timer = setTimeout(persist, 500)
+    return () => clearTimeout(timer)
+  }, [dirty, persist])
   const chars = answer.replace(/\s/g, "").length
   const decide = (changeIndex: number, decision: "accepted" | "rejected", pendingCount: number) => {
     if (!review) return
     const args = [project.id, review.reference.sessionId, review.reference.messageId, review.suggestion.id, changeIndex] as const
     const nextAnswer = decision === "accepted" ? localServices.acceptSuggestion(...args) : localServices.rejectSuggestion(...args)
-    if (nextAnswer !== undefined) setAnswer(nextAnswer)
+    if (nextAnswer !== undefined) { history.replace({ title, question, answer: nextAnswer }); setSaved((current) => ({ ...current, answer: nextAnswer })) }
     toast[decision === "accepted" ? "success" : "info"](`변경 ${changeIndex + 1}을 ${decision === "accepted" ? "반영했어요." : "거절했어요."}`)
     if (pendingCount === 1) onReviewComplete()
   }
-  return <section className="pane bg-slate-100"><div className="pane-heading bg-white"><div><p className="pane-kicker text-blue-600">COVER LETTER</p><input aria-label="문항 파일명" value={title} onChange={(event) => setTitle(event.target.value)} className="w-full bg-transparent font-bold outline-none" /></div><span className="text-xs font-semibold text-slate-400">{review ? "AI 제안 검토 중" : changed ? "저장 중…" : "저장됨"}</span></div><div className="editor-scroll"><div className="document-page"><div className="mb-6"><p className="text-sm font-bold text-blue-600">{project.company} · {project.role}</p><label className="mt-5 block"><span className="form-label">질문</span><textarea value={question} onChange={(event) => setQuestion(event.target.value)} className="question-editor" placeholder="자기소개서 문항을 입력하세요." /></label></div><div><span className="form-label">답변</span>{review ? <InlineSuggestion suggestion={review.suggestion} onDecide={decide} /> : <textarea aria-label="자기소개서 답변" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="이 문항에 대한 나만의 경험을 구체적으로 작성해 보세요…" className="essay-editor" />}</div><div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs font-semibold text-slate-400"><span>공백 제외 {chars.toLocaleString()}자</span><span>권장 700–1,000자</span></div></div></div></section>
+  // 편집기 어디서든 Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+S 단축키를 처리한다.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const meta = event.metaKey || event.ctrlKey
+    if (!meta) return
+    const key = event.key.toLowerCase()
+    if (key === "s") { event.preventDefault(); persist(); toast.success("저장했어요.") }
+    else if (key === "z" && !event.shiftKey) { event.preventDefault(); history.undo() }
+    else if ((key === "z" && event.shiftKey) || key === "y") { event.preventDefault(); history.redo() }
+  }
+  return <section className="pane bg-slate-100" onKeyDown={onKeyDown}><div className="pane-heading bg-white"><div className="min-w-0 flex-1"><p className="pane-kicker text-blue-600">COVER LETTER</p><input aria-label="문항 파일명" value={title} onChange={(event) => history.update({ title: event.target.value })} className="w-full bg-transparent font-bold outline-none" /></div><div className="flex shrink-0 items-center gap-1"><button type="button" onClick={history.undo} disabled={!history.canUndo} title="실행취소 (Ctrl/Cmd+Z)" className="grid size-8 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30"><Undo2 className="size-4" /></button><button type="button" onClick={history.redo} disabled={!history.canRedo} title="재실행 (Ctrl/Cmd+Shift+Z)" className="grid size-8 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30"><Redo2 className="size-4" /></button><span className="ml-1 text-xs font-semibold text-slate-400">{review ? "AI 제안 검토 중" : dirty ? "저장 중…" : "저장됨"}</span></div></div><div className="editor-scroll"><div className="document-page"><div className="mb-6"><p className="text-sm font-bold text-blue-600">{project.company} · {project.role}</p><label className="mt-5 block"><span className="form-label">질문</span><textarea value={question} onChange={(event) => history.update({ question: event.target.value })} className="question-editor" placeholder="자기소개서 문항을 입력하세요." /></label></div><div><span className="form-label">답변</span>{review ? <InlineSuggestion suggestion={review.suggestion} onDecide={decide} /> : <textarea aria-label="자기소개서 답변" value={answer} onChange={(event) => history.update({ answer: event.target.value })} placeholder="이 문항에 대한 나만의 경험을 구체적으로 작성해 보세요…" className="essay-editor" />}</div><div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs font-semibold text-slate-400"><span>공백 제외 {chars.toLocaleString()}자</span><span>권장 700–1,000자</span></div></div></div></section>
 }
 
 function EmptyEssay({ onCreate }: { onCreate: () => void }) {
@@ -341,7 +453,13 @@ function ReportSection({ title, tone, items }: { title: string; tone: "good" | "
 function ContributePage({ state }: { state: AppState }) {
   const router = useRouter()
   const emptyForm = { company: "", role: "", applicationPeriod: "", result: "passed" as "passed" | "failed", questions: [{ question: "", answer: "" }] }
-  const [form, setForm] = useState(emptyForm)
+  // 워크스페이스에서 '자소서 기여하기'로 넘어온 초안이 있으면 최초 렌더 시 폼을 채운다.
+  // 초안은 한 번 읽으면 비워지는 일회성 값이라 lazy initializer로 처리한다.
+  const [prefilled] = useState(() => localServices.takeContributionDraft())
+  const [form, setForm] = useState(() => prefilled
+    ? { ...emptyForm, company: prefilled.company, role: prefilled.role, questions: prefilled.questions.length ? prefilled.questions : emptyForm.questions }
+    : emptyForm)
+  useEffect(() => { if (prefilled) toast.info("워크스페이스의 자소서 내용을 불러왔어요. 지원 시기와 결과를 확인해 주세요.") }, [prefilled])
   const updateQuestion = (index: number, field: "question" | "answer", value: string) => setForm({ ...form, questions: form.questions.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) })
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -351,7 +469,13 @@ function ContributePage({ state }: { state: AppState }) {
     setForm(emptyForm)
     toast.success("기여가 완료되어 500 크레딧을 받았어요!")
   }
-  return <main className="page-wrap max-w-5xl"><section className="mb-8"><p className="eyebrow">DATA CONTRIBUTION</p><h1 className="page-title">과거 자소서로 크레딧 받기</h1><p className="page-subtitle">합격·불합격 결과를 공유하면 더 나은 분석 데이터를 만들고 500 크레딧을 받아요.</p></section><div className="grid gap-6 lg:grid-cols-[1fr_320px]"><form onSubmit={submit} className="surface-card space-y-6 p-6"><div className="grid gap-4 sm:grid-cols-2"><FormField label="회사명 *" value={form.company} onChange={(company) => setForm({ ...form, company })} placeholder="지원했던 회사" /><FormField label="지원 직무 *" value={form.role} onChange={(role) => setForm({ ...form, role })} placeholder="지원했던 직무" /><label><span className="form-label">지원 시기 *</span><input className="text-input" type="month" value={form.applicationPeriod} onChange={(event) => setForm({ ...form, applicationPeriod: event.target.value })} /></label><div><span className="form-label">지원 결과 *</span><div className="grid grid-cols-2 gap-2">{(["passed", "failed"] as const).map((result) => <button key={result} type="button" onClick={() => setForm({ ...form, result })} className={`result-option h-11 ${form.result === result ? "selected" : ""}`}><span className={`status status-${result}`}>{statusLabel[result]}</span>{form.result === result && <Check className="size-4 text-blue-600" />}</button>)}</div></div></div><div className="space-y-4"><div className="flex items-center justify-between"><div><h2 className="font-bold">자기소개서 문항</h2><p className="mt-1 text-xs text-slate-400">실제 제출했던 질문과 답변을 문항별로 입력하세요.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setForm({ ...form, questions: [...form.questions, { question: "", answer: "" }] })}><Plus />문항 추가</Button></div>{form.questions.map((item, index) => <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">문항 {index + 1}</strong>{form.questions.length > 1 && <button type="button" onClick={() => setForm({ ...form, questions: form.questions.filter((_, itemIndex) => itemIndex !== index) })} className="text-xs font-bold text-rose-600">삭제</button>}</div><label><span className="form-label">질문 *</span><textarea className="question-editor bg-white" value={item.question} onChange={(event) => updateQuestion(index, "question", event.target.value)} placeholder="예: 지원 동기와 입사 후 목표를 작성해 주세요." /></label><label className="mt-3 block"><span className="form-label">답변 *</span><textarea className="contribution-editor min-h-52 bg-white" value={item.answer} onChange={(event) => updateQuestion(index, "answer", event.target.value)} placeholder="제출했던 답변을 입력해 주세요." /><span className="mt-2 block text-right text-xs text-slate-400">{item.answer.trim().length} / 최소 100자</span></label></div>)}</div><Button type="submit" className="h-12 w-full bg-blue-600 text-base hover:bg-blue-700">제출하고 500 크레딧 받기</Button></form><aside className="space-y-4"><div className="rounded-2xl bg-slate-950 p-6 text-white"><Coins className="size-8 text-amber-400" /><p className="mt-5 text-sm text-slate-400">현재 보유 크레딧</p><p className="mt-1 text-3xl font-bold">{state.creditBalance.toLocaleString()}</p><Button onClick={() => router.push("/credits")} className="mt-4 w-full bg-blue-600 hover:bg-blue-700"><CreditCard />크레딧 충전</Button><p className="mt-5 border-t border-slate-800 pt-5 text-sm leading-6 text-slate-400">기여 1건마다 500 크레딧이 즉시 지급됩니다.</p></div><div className="surface-card p-5"><h2 className="font-bold">데이터는 이렇게 사용돼요</h2><ul className="mt-3 space-y-3 text-sm leading-6 text-slate-500"><li>• 개인을 특정하는 정보는 분석 전에 제거합니다.</li><li>• 유사 지원자의 강점과 취약점을 찾는 데 활용합니다.</li><li>• 이 목업에서는 외부 서버로 전송되지 않습니다.</li></ul></div></aside></div></main>
+  return <main className="page-wrap max-w-5xl"><section className="mb-8"><p className="eyebrow">DATA CONTRIBUTION</p><h1 className="page-title">과거 자소서로 크레딧 받기</h1><p className="page-subtitle">합격·불합격 결과를 공유하면 더 나은 분석 데이터를 만들고 500 크레딧을 받아요.</p></section><div className="grid gap-6 lg:grid-cols-[1fr_320px]"><form onSubmit={submit} className="surface-card space-y-6 p-6"><div className="grid gap-4 sm:grid-cols-2"><FormField label="회사명 *" value={form.company} onChange={(company) => setForm({ ...form, company })} placeholder="지원했던 회사" /><FormField label="지원 직무 *" value={form.role} onChange={(role) => setForm({ ...form, role })} placeholder="지원했던 직무" /><label><span className="form-label">지원 시기 *</span><input className="text-input" type="month" value={form.applicationPeriod} onChange={(event) => setForm({ ...form, applicationPeriod: event.target.value })} /></label><div><span className="form-label">지원 결과 *</span><div className="grid grid-cols-2 gap-2">{(["passed", "failed"] as const).map((result) => <button key={result} type="button" onClick={() => setForm({ ...form, result })} className={`result-option h-11 ${form.result === result ? "selected" : ""}`}><span className={`status status-${result}`}>{statusLabel[result]}</span>{form.result === result && <Check className="size-4 text-blue-600" />}</button>)}</div></div></div><div className="space-y-4"><div className="flex items-center justify-between"><div><h2 className="font-bold">자기소개서 문항</h2><p className="mt-1 text-xs text-slate-400">실제 제출했던 질문과 답변을 문항별로 입력하세요.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setForm({ ...form, questions: [...form.questions, { question: "", answer: "" }] })}><Plus />문항 추가</Button></div>{form.questions.map((item, index) => <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">문항 {index + 1}</strong>{form.questions.length > 1 && <button type="button" onClick={() => setForm({ ...form, questions: form.questions.filter((_, itemIndex) => itemIndex !== index) })} className="text-xs font-bold text-rose-600">삭제</button>}</div><label><span className="form-label">질문 *</span><textarea className="question-editor bg-white" value={item.question} onChange={(event) => updateQuestion(index, "question", event.target.value)} placeholder="예: 지원 동기와 입사 후 목표를 작성해 주세요." /></label><label className="mt-3 block"><span className="form-label">답변 *</span><textarea className="contribution-editor min-h-52 bg-white" value={item.answer} onChange={(event) => updateQuestion(index, "answer", event.target.value)} placeholder="제출했던 답변을 입력해 주세요." /><span className="mt-2 block text-right text-xs text-slate-400">{item.answer.trim().length} / 최소 100자</span></label></div>)}</div><Button type="submit" className="h-12 w-full bg-blue-600 text-base hover:bg-blue-700">제출하고 500 크레딧 받기</Button></form><aside className="space-y-4"><div className="rounded-2xl bg-slate-950 p-6 text-white"><Coins className="size-8 text-amber-400" /><p className="mt-5 text-sm text-slate-400">현재 보유 크레딧</p><p className="mt-1 text-3xl font-bold">{state.creditBalance.toLocaleString()}</p><Button onClick={() => router.push("/credits")} className="mt-4 w-full bg-blue-600 hover:bg-blue-700"><CreditCard />크레딧 충전</Button><p className="mt-5 border-t border-slate-800 pt-5 text-sm leading-6 text-slate-400">기여 1건마다 500 크레딧이 즉시 지급됩니다.</p></div><button onClick={() => router.push("/contributions")} className="surface-card flex w-full items-center justify-between p-5 text-left transition hover:border-blue-200 hover:bg-blue-50/40"><div><h2 className="font-bold">내 기여 내역</h2><p className="mt-1 text-xs text-slate-400">지금까지 기여한 자소서 {state.contributions.length}건을 확인하세요.</p></div><ChevronRight className="size-5 shrink-0 text-slate-400" /></button><div className="surface-card p-5"><h2 className="font-bold">데이터는 이렇게 사용돼요</h2><ul className="mt-3 space-y-3 text-sm leading-6 text-slate-500"><li>• 개인을 특정하는 정보는 분석 전에 제거합니다.</li><li>• 유사 지원자의 강점과 취약점을 찾는 데 활용합니다.</li><li>• 이 목업에서는 외부 서버로 전송되지 않습니다.</li></ul></div></aside></div></main>
+}
+
+function ContributionHistoryPage({ state }: { state: AppState }) {
+  const router = useRouter()
+  const contributions = [...state.contributions].reverse()
+  return <main className="page-wrap max-w-4xl"><button onClick={() => router.push("/contribute")} className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4" />자소서 기여로 돌아가기</button><section className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="eyebrow">MY CONTRIBUTIONS</p><h1 className="page-title">내 기여 내역</h1><p className="page-subtitle">지금까지 기여한 자소서와 결과를 확인하세요.</p></div><Button onClick={() => router.push("/contribute")} className="h-11 bg-blue-600 px-5 hover:bg-blue-700"><Plus />새 기여</Button></section>{contributions.length ? <div className="space-y-4">{contributions.map((item) => <article key={item.id} className="surface-card p-5"><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><span className={`status status-${item.result}`}>{statusLabel[item.result]}</span><span className="text-xs font-semibold text-slate-400">{item.applicationPeriod}</span></div><h2 className="mt-2 text-lg font-bold">{item.company}</h2><p className="text-sm text-slate-500">{item.role}</p></div><span className="text-xs font-semibold text-slate-400">문항 {item.questions.length}개</span></div><div className="mt-4 space-y-3 border-t border-slate-100 pt-4">{item.questions.map((question, index) => <div key={index}><p className="text-sm font-bold text-slate-700">Q{index + 1}. {question.question || "질문 미입력"}</p><p className="mt-1 line-clamp-3 whitespace-pre-line text-sm leading-6 text-slate-500">{question.answer}</p></div>)}</div><p className="mt-4 text-right text-xs text-slate-400">{new Date(item.createdAt).toLocaleDateString("ko-KR")} 기여 · +500 크레딧</p></article>)}</div> : <div className="surface-card grid min-h-64 place-items-center p-8 text-center"><div><FilePlus2 className="mx-auto size-10 text-blue-500" /><h2 className="mt-4 text-lg font-bold">아직 기여한 자소서가 없어요</h2><p className="mt-2 text-sm leading-6 text-slate-500">과거 자소서를 기여하면 500 크레딧을 받고, 여기에서 이력을 확인할 수 있어요.</p><Button className="mt-4 bg-blue-600 hover:bg-blue-700" onClick={() => router.push("/contribute")}><Plus />자소서 기여하러 가기</Button></div></div>}</main>
 }
 
 const creditPacks = [

@@ -17,6 +17,12 @@ import { createInlineDiff } from "./essay-diff"
 import { createSyntheticEssays } from "./synthetic-data"
 import { extractTextFromBlob } from "./text-extract"
 
+export interface ContributionDraft {
+  company: string
+  role: string
+  questions: Array<{ question: string; answer: string }>
+}
+
 const STORAGE_KEY = "coverletteride:v1"
 const DB_NAME = "coverletteride-files"
 const now = () => new Date().toISOString()
@@ -74,6 +80,7 @@ const seedState = (): AppState => {
 
 let state: AppState = seedState()
 let initialized = false
+let contributionDraft: ContributionDraft | null = null
 const listeners = new Set<() => void>()
 
 function persist() {
@@ -222,19 +229,14 @@ export const localServices = {
     setFiles(projectId, fileIds) {
       update((s) => ({ ...s, projects: s.projects.map((project) => project.id === projectId ? { ...project, fileIds: [...new Set(fileIds)] } : project) }))
     },
+    // 합격/불합격 여부는 상태 저장만 담당한다. 크레딧 보상은 '자소서 기여' 액션과
+    // 분리되어, 사용자가 기여 페이지에서 실제로 자소서를 제출할 때만 지급된다.
     updateStatus(projectId, status) {
       const project = state.projects.find((item) => item.id === projectId)
       if (!project) return
-      const shouldReward = status !== "pending" && !project.resultRewarded
       update((s) => ({
         ...s,
-        projects: s.projects.map((item) =>
-          item.id === projectId ? { ...item, status, resultRewarded: item.resultRewarded || shouldReward } : item,
-        ),
-        creditBalance: s.creditBalance + (shouldReward ? 500 : 0),
-        transactions: shouldReward
-          ? [...s.transactions, { id: id(), amount: 500, reason: "지원 결과 기여", referenceId: projectId, createdAt: now() }]
-          : s.transactions,
+        projects: s.projects.map((item) => item.id === projectId ? { ...item, status } : item),
       }))
     },
   } satisfies ProjectRepository,
@@ -324,6 +326,18 @@ export const localServices = {
       update((s) => ({
         ...s,
         essays: { ...s.essays, [projectId]: (s.essays[projectId] ?? []).map((essay) => essay.id === essayId ? { ...essay, ...input, updatedAt: now() } : essay) },
+      }))
+    },
+    // 문항을 삭제하고 남은 문항의 순서를 다시 매긴다.
+    remove(projectId, essayId) {
+      update((s) => ({
+        ...s,
+        essays: {
+          ...s.essays,
+          [projectId]: (s.essays[projectId] ?? [])
+            .filter((essay) => essay.id !== essayId)
+            .map((essay, index) => ({ ...essay, order: index })),
+        },
       }))
     },
   } satisfies EssayRepository,
@@ -529,5 +543,16 @@ export const localServices = {
     const contribution = { ...input, id: id(), createdAt: now() }
     update((s) => ({ ...s, contributions: [...s.contributions, contribution] }))
     localServices.credits.reward(500, "자소서 데이터 기여", contribution.id)
+  },
+  // 워크스페이스에서 '자소서 기여하기'를 누르면 현재 문항을 임시로 담아두고,
+  // 기여 페이지가 최초 렌더 시 한 번 꺼내 폼을 자동으로 채운다. localStorage에
+  // 저장하지 않는 일회성 전달 값이라 새로고침 시 사라진다(목업 정책과 일치).
+  setContributionDraft(draft: ContributionDraft | null) {
+    contributionDraft = draft
+  },
+  takeContributionDraft() {
+    const draft = contributionDraft
+    contributionDraft = null
+    return draft
   },
 }

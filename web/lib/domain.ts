@@ -158,6 +158,7 @@ export interface FileRepository {
 export interface EssayRepository {
   create(projectId: string): Essay
   save(projectId: string, essayId: string, input: Partial<Pick<Essay, "title" | "question" | "answer">>): void
+  remove(projectId: string, essayId: string): void
 }
 
 export interface AiService {
