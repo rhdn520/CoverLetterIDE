@@ -42,8 +42,11 @@ export function CoverLetterApp() {
   const pathname = usePathname()
   const router = useRouter()
   const isWorkspace = /^\/projects\/[^/]+\/workspace$/.test(pathname)
-  useEffect(() => { if (state && !state.user && pathname !== "/login" && pathname !== "/") router.replace("/login") }, [state, pathname, router])
+  // 로그인 없이도 접근 가능한 공개 페이지(법적 고지 등).
+  const isPublicLegal = pathname === "/privacy" || pathname === "/terms"
+  useEffect(() => { if (state && !state.user && pathname !== "/login" && pathname !== "/" && !isPublicLegal) router.replace("/login") }, [state, pathname, router, isPublicLegal])
   if (!state) return <div className="grid min-h-screen place-items-center bg-slate-950 text-slate-300">워크스페이스를 불러오는 중…</div>
+  if (isPublicLegal) return <div className="min-h-screen bg-slate-50 text-slate-950"><LegalPage kind={pathname === "/privacy" ? "privacy" : "terms"} /><Toaster position="bottom-right" /></div>
   if (!state.user || pathname === "/login" || pathname === "/") return <RealLoginPage />
   const workspace = pathname.match(/^\/projects\/([^/]+)\/workspace$/)
   const dashboard = pathname.match(/^\/projects\/([^/]+)\/dashboard$/)
@@ -58,12 +61,55 @@ export function CoverLetterApp() {
 
 function RealLoginPage() {
   const [loading, setLoading] = useState(false)
+  const router = useRouter()
   const startGoogleLogin = async () => {
     setLoading(true)
     try { await localServices.auth.signIn() }
     catch (error) { toast.error(error instanceof Error ? error.message : "Google 로그인을 시작하지 못했습니다."); setLoading(false) }
   }
-  return <main className="login-shell"><div className="login-aside"><Logo /><div className="relative z-10 max-w-lg"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1.5 text-sm font-semibold text-blue-200"><Sparkles className="size-4" />취업 준비를 한 곳에서</div><h1 className="text-4xl font-bold leading-[1.15] tracking-[-0.04em] text-white sm:text-6xl">흩어진 경험을 모아<br />설득력 있는 이야기로.</h1><p className="mt-6 max-w-md text-lg leading-8 text-slate-300">자료 관리부터 기업별 자소서 작성, AI 피드백과 지원 결과 기록까지 하나의 워크스페이스에서 이어가세요.</p></div></div><section className="grid min-h-[50vh] place-items-center bg-white p-6 sm:p-12"><div className="w-full max-w-sm"><p className="text-sm font-bold text-blue-600">COVERLETTERIDE</p><h2 className="mt-3 text-3xl font-bold tracking-tight">Google 계정으로 시작하세요</h2><p className="mt-2 text-slate-500">작성한 자료는 본인만 열람할 수 있도록 보호됩니다.</p><Button disabled={loading} className="mt-8 h-12 w-full bg-blue-600 text-base hover:bg-blue-700" onClick={() => void startGoogleLogin()}>{loading ? "Google로 이동하는 중…" : "Google로 계속하기"} <ChevronRight /></Button><p className="mt-5 text-center text-xs leading-5 text-slate-400">로그인하면 서비스 이용 및 기여 데이터 처리에 필요한 세션이 생성됩니다.</p></div></section></main>
+  return <main className="login-shell"><div className="login-aside"><Logo /><div className="relative z-10 max-w-lg"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1.5 text-sm font-semibold text-blue-200"><Sparkles className="size-4" />취업 준비를 한 곳에서</div><h1 className="text-4xl font-bold leading-[1.15] tracking-[-0.04em] text-white sm:text-6xl">흩어진 경험을 모아<br />설득력 있는 이야기로.</h1><p className="mt-6 max-w-md text-lg leading-8 text-slate-300">자료 관리부터 기업별 자소서 작성, AI 피드백과 지원 결과 기록까지 하나의 워크스페이스에서 이어가세요.</p></div></div><section className="grid min-h-[50vh] place-items-center bg-white p-6 sm:p-12"><div className="w-full max-w-sm"><p className="text-sm font-bold text-blue-600">COVERLETTERIDE</p><h2 className="mt-3 text-3xl font-bold tracking-tight">Google 계정으로 시작하세요</h2><p className="mt-2 text-slate-500">작성한 자료는 본인만 열람할 수 있도록 보호됩니다.</p><Button disabled={loading} className="mt-8 h-12 w-full bg-blue-600 text-base hover:bg-blue-700" onClick={() => void startGoogleLogin()}>{loading ? "Google로 이동하는 중…" : "Google로 계속하기"} <ChevronRight /></Button><p className="mt-5 text-center text-xs leading-5 text-slate-400">로그인하면 서비스 이용 및 기여 데이터 처리에 필요한 세션이 생성됩니다.</p><p className="mt-3 text-center text-xs text-slate-400"><button type="button" onClick={() => router.push("/privacy")} className="font-semibold text-slate-500 hover:text-slate-700 hover:underline">개인정보처리방침</button><span className="mx-2">·</span><button type="button" onClick={() => router.push("/terms")} className="font-semibold text-slate-500 hover:text-slate-700 hover:underline">서비스 이용약관</button></p></div></section></main>
+}
+
+const legalContent = {
+  privacy: {
+    eyebrow: "PRIVACY",
+    title: "개인정보처리방침",
+    updated: "최종 업데이트: 2026-10-01",
+    intro: "CoverLetterIDE(이하 \"서비스\")는 이용자의 개인정보를 중요하게 생각하며, 관련 법령을 준수합니다. 본 방침은 서비스가 어떤 정보를 수집하고 어떻게 이용·보관·파기하는지 설명합니다.",
+    sections: [
+      { h: "1. 수집하는 정보", items: ["계정 정보: Google 로그인으로 제공되는 이름, 이메일, 프로필 식별자.", "작성 데이터: 프로필(학교·전공·경험·수상), 지원 프로젝트, 자기소개서 문항·답변, AI 코치 대화.", "업로드 파일: 이용자가 올린 증빙/첨부 자료 원본과 추출된 텍스트.", "크레딧·이용 기록: 크레딧 증감 내역과 AI 기능 사용 기록."] },
+      { h: "2. 정보의 이용 목적", items: ["서비스 제공: 자료 관리, 자기소개서 작성, AI 피드백과 분석 제공.", "AI 분석: 이용자 자소서를 임베딩하고 유사 사례와 비교해 피드백을 생성.", "크레딧 운영: 월 기본 크레딧 지급, 사용량 차감, 기여 보상 지급."] },
+      { h: "3. 기여 데이터의 익명화", items: ["이용자가 동의 후 기여한 과거 자소서는 이름·이메일·전화번호 등 식별 정보를 제거한 뒤 저장·색인됩니다.", "다른 이용자의 분석에 활용될 때도 기여자를 식별할 수 없도록 익명화된 형태로만 사용됩니다."] },
+      { h: "4. 보관 및 파기", items: ["개인정보는 서비스 이용 기간 동안 보관하며, 계정 삭제 시 관련 데이터(DB 행, 업로드 원본, 임베딩)를 삭제합니다.", "익명화된 기여 데이터는 동의 범위와 처리 방침에 따라 별도로 관리될 수 있습니다."] },
+      { h: "5. 제3자 처리", items: ["AI 기능 제공을 위해 OpenAI 등 외부 AI API에 자소서 내용이 전송될 수 있습니다. 인증·저장·호스팅은 Supabase와 Cloudflare 인프라를 사용합니다.", "서비스는 이용자 데이터를 광고 목적으로 판매하지 않습니다."] },
+      { h: "6. 이용자 권리", items: ["이용자는 자신의 데이터 열람·수정·삭제를 요청할 수 있으며, 계정 삭제로 데이터 삭제를 요청할 수 있습니다."] },
+      { h: "7. 문의", items: ["개인정보 관련 문의는 서비스 운영자에게 연락하실 수 있습니다. (연락처는 추후 명시)"] },
+    ],
+    note: "본 방침은 서비스 초기 버전의 초안이며, 정식 공개 전 법률 검토를 거쳐 변경될 수 있습니다.",
+  },
+  terms: {
+    eyebrow: "TERMS",
+    title: "서비스 이용약관",
+    updated: "최종 업데이트: 2026-10-01",
+    intro: "본 약관은 CoverLetterIDE(이하 \"서비스\") 이용에 관한 조건을 정합니다. 서비스를 이용함으로써 이용자는 본 약관에 동의한 것으로 봅니다.",
+    sections: [
+      { h: "1. 서비스 내용", items: ["서비스는 자기소개서 자료 관리, 작성, AI 기반 피드백·분석, 크레딧 기반 보상 기능을 제공합니다.", "서비스는 채용 공고 검색이나 지원서를 기업에 직접 제출하는 기능을 제공하지 않습니다."] },
+      { h: "2. 계정", items: ["이용자는 Google 계정으로 로그인하며, 계정과 활동에 대한 책임은 이용자에게 있습니다."] },
+      { h: "3. 크레딧", items: ["이용자는 매월 기본 크레딧을 받으며, AI 코치·AI 분석 사용 시 크레딧이 차감됩니다.", "과거 자소서를 기여하면 보상 크레딧을 받을 수 있습니다. 크레딧은 현금으로 환급되지 않습니다."] },
+      { h: "4. 이용자 책임", items: ["이용자는 타인의 권리를 침해하거나 허위·불법 정보를 업로드해서는 안 됩니다.", "크레딧 보상을 노린 의미 없는 데이터나 허위 결과의 반복 제출은 제한될 수 있습니다."] },
+      { h: "5. AI 결과의 한계", items: ["AI 피드백·분석은 참고용이며, 정확성이나 합격을 보장하지 않습니다. 최종 판단과 책임은 이용자에게 있습니다."] },
+      { h: "6. 지식재산", items: ["이용자가 작성·업로드한 콘텐츠의 권리는 이용자에게 있으며, 서비스는 기능 제공을 위해 필요한 범위에서 이를 처리합니다."] },
+      { h: "7. 책임의 제한", items: ["서비스는 무료/초기 단계로 제공될 수 있으며, 중단·오류·데이터 손실에 대해 관련 법령이 허용하는 범위에서 책임이 제한됩니다."] },
+      { h: "8. 약관 변경", items: ["서비스는 필요 시 약관을 변경할 수 있으며, 중요한 변경은 서비스 내에 공지합니다."] },
+    ],
+    note: "본 약관은 서비스 초기 버전의 초안이며, 정식 공개 전 법률 검토를 거쳐 변경될 수 있습니다.",
+  },
+} as const
+
+function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
+  const router = useRouter()
+  const content = legalContent[kind]
+  return <main className="page-wrap max-w-3xl"><button onClick={() => router.back()} className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4" />돌아가기</button><section className="mb-8"><p className="eyebrow">{content.eyebrow}</p><h1 className="page-title">{content.title}</h1><p className="page-subtitle">{content.updated}</p></section><article className="surface-card space-y-6 p-6 text-sm leading-7 text-slate-600"><p>{content.intro}</p>{content.sections.map((section) => <section key={section.h} className="space-y-2"><h2 className="font-bold text-slate-900">{section.h}</h2><ul className="space-y-1.5">{section.items.map((item) => <li key={item} className="flex gap-2"><span className="mt-2.5 size-1 shrink-0 rounded-full bg-slate-400" />{item}</li>)}</ul></section>)}<p className="rounded-xl bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-900">{content.note}</p></article><div className="mt-6 flex gap-4 text-sm font-semibold text-blue-600"><button onClick={() => router.push("/privacy")} className="hover:underline">개인정보처리방침</button><button onClick={() => router.push("/terms")} className="hover:underline">서비스 이용약관</button></div></main>
 }
 
 function RealContributePage({ state }: { state: AppState }) {
