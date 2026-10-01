@@ -92,6 +92,7 @@ export interface AnalysisReport {
   projectId: string
   cacheKey: string
   score: number
+  summary: string
   strengths: string[]
   weaknesses: string[]
   suggestions: string[]

@@ -128,9 +128,10 @@ Deno.serve(async (request) => {
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: [
-              "너는 한국 취업 자소서 코치다. 아래 '지원자 자소서'를 평가해 한국어 JSON만 반환한다: {strengths:string[], weaknesses:string[], suggestions:string[]}.",
+              "너는 한국 취업 자소서 코치다. 아래 '지원자 자소서'를 평가해 한국어 JSON만 반환한다: {summary:string, strengths:string[], weaknesses:string[], suggestions:string[]}.",
               "매우 중요한 규칙:",
               "- 모든 항목은 반드시 '지원자 자소서'의 실제 내용에 근거해야 한다. 사례나 일반론을 그대로 옮기지 말 것.",
+              "- summary: 이 지원자 자소서에 대한 2~3문장의 총평. 전반적 인상과 가장 중요한 한 가지 개선 방향을 지원자 자소서 내용에 근거해 요약.",
               "- strengths: 합격군 특징 중 지원자가 '이미 갖춘' 것을, 지원자 자소서의 어느 부분이 그런지와 함께.",
               "- weaknesses: 합격군 특징 중 지원자에게 '빠진' 것, 또는 불합격군 특징 중 지원자에게 '나타나는' 것을.",
               "- suggestions: 지원자 자소서를 합격군 쪽으로 끌어올릴 구체적이고 실행 가능한 수정 제안. 어느 문장/문단을 어떻게 바꿀지.",
@@ -147,7 +148,7 @@ Deno.serve(async (request) => {
         return response({ error: `분석 리포트 생성에 실패했습니다: ${reportError instanceof Error ? reportError.message : "unknown"}` }, 502)
       }
 
-      const { error: saveError } = await service.from("analysis_reports").insert({ project_id: projectId, user_id: currentUser.id, cache_key: cacheKey, model_version: modelVersion, score, strengths: report.strengths ?? [], weaknesses: report.weaknesses ?? [], suggestions: report.suggestions ?? [], passed_matches: passed.length, failed_matches: failed.length })
+      const { error: saveError } = await service.from("analysis_reports").insert({ project_id: projectId, user_id: currentUser.id, cache_key: cacheKey, model_version: modelVersion, score, summary: typeof report.summary === "string" ? report.summary : "", strengths: report.strengths ?? [], weaknesses: report.weaknesses ?? [], suggestions: report.suggestions ?? [], passed_matches: passed.length, failed_matches: failed.length })
       if (saveError) throw saveError
       return response({ ok: true, cached: false })
     } catch (error) { await user.rpc("refund_credit_reservation", { p_reason: reason, p_request_id: requestId }); throw error }
