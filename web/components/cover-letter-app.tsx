@@ -16,7 +16,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Toaster } from "@/components/ui/sonner"
 import { useAppState } from "@/hooks/use-app-state"
 import { createInlineDiff } from "@/lib/essay-diff"
-import { localServices } from "@/lib/local-services"
+import { supabaseServices as localServices } from "@/lib/supabase/services"
 import type { AppState, ApplicationStatus, ChatSession, Essay, EssaySuggestion, EvidenceFile, Project } from "@/lib/domain"
 
 const statusLabel: Record<ApplicationStatus, string> = { pending: "대기중", passed: "합격", failed: "불합격" }
@@ -44,16 +44,46 @@ export function CoverLetterApp() {
   const isWorkspace = /^\/projects\/[^/]+\/workspace$/.test(pathname)
   useEffect(() => { if (state && !state.user && pathname !== "/login" && pathname !== "/") router.replace("/login") }, [state, pathname, router])
   if (!state) return <div className="grid min-h-screen place-items-center bg-slate-950 text-slate-300">워크스페이스를 불러오는 중…</div>
-  if (!state.user || pathname === "/login" || pathname === "/") return <LoginPage />
+  if (!state.user || pathname === "/login" || pathname === "/") return <RealLoginPage />
   const workspace = pathname.match(/^\/projects\/([^/]+)\/workspace$/)
   const dashboard = pathname.match(/^\/projects\/([^/]+)\/dashboard$/)
   let page = <HubPage state={state} />
-  if (pathname === "/contribute") page = <ContributePage state={state} />
+  if (pathname === "/contribute") page = <RealContributePage state={state} />
   if (pathname === "/contributions") page = <ContributionHistoryPage state={state} />
-  if (pathname === "/credits") page = <CreditChargePage state={state} />
+  if (pathname === "/credits") page = <RealCreditPage state={state} />
   if (workspace) page = <WorkspacePage state={state} projectId={workspace[1]} />
   if (dashboard) page = <LegacyDashboardRoute state={state} projectId={dashboard[1]} />
   return <div className="min-h-screen bg-slate-50 text-slate-950">{!isWorkspace && <AppHeader state={state} />}{page}<Toaster position="bottom-right" /></div>
+}
+
+function RealLoginPage() {
+  const [loading, setLoading] = useState(false)
+  const startGoogleLogin = async () => {
+    setLoading(true)
+    try { await localServices.auth.signIn() }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Google 로그인을 시작하지 못했습니다."); setLoading(false) }
+  }
+  return <main className="login-shell"><div className="login-aside"><Logo /><div className="relative z-10 max-w-lg"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1.5 text-sm font-semibold text-blue-200"><Sparkles className="size-4" />취업 준비를 한 곳에서</div><h1 className="text-4xl font-bold leading-[1.15] tracking-[-0.04em] text-white sm:text-6xl">흩어진 경험을 모아<br />설득력 있는 이야기로.</h1><p className="mt-6 max-w-md text-lg leading-8 text-slate-300">자료 관리부터 기업별 자소서 작성, AI 피드백과 지원 결과 기록까지 하나의 워크스페이스에서 이어가세요.</p></div></div><section className="grid min-h-[50vh] place-items-center bg-white p-6 sm:p-12"><div className="w-full max-w-sm"><p className="text-sm font-bold text-blue-600">COVERLETTERIDE</p><h2 className="mt-3 text-3xl font-bold tracking-tight">Google 계정으로 시작하세요</h2><p className="mt-2 text-slate-500">작성한 자료는 본인만 열람할 수 있도록 보호됩니다.</p><Button disabled={loading} className="mt-8 h-12 w-full bg-blue-600 text-base hover:bg-blue-700" onClick={() => void startGoogleLogin()}>{loading ? "Google로 이동하는 중…" : "Google로 계속하기"} <ChevronRight /></Button><p className="mt-5 text-center text-xs leading-5 text-slate-400">로그인하면 서비스 이용 및 기여 데이터 처리에 필요한 세션이 생성됩니다.</p></div></section></main>
+}
+
+function RealContributePage({ state }: { state: AppState }) {
+  const router = useRouter()
+  const [company, setCompany] = useState(""); const [role, setRole] = useState(""); const [applicationPeriod, setPeriod] = useState(""); const [result, setResult] = useState<"passed" | "failed">("passed")
+  const [question, setQuestion] = useState(""); const [answer, setAnswer] = useState(""); const [consented, setConsented] = useState(false); const [saving, setSaving] = useState(false)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!company.trim() || !role.trim() || !applicationPeriod || !question.trim() || answer.trim().length < 100 || !consented) { toast.error("회사·직무·시기·문항·100자 이상 답변과 데이터 활용 동의가 필요합니다."); return }
+    setSaving(true)
+    try { await localServices.contribute({ company, role, applicationPeriod, result, questions: [{ question, answer }] }); toast.success("기여가 검증되어 500 크레딧을 지급했습니다."); router.push("/contributions") }
+    catch (error) { toast.error(error instanceof Error ? error.message : "기여를 저장하지 못했습니다.") }
+    finally { setSaving(false) }
+  }
+  return <main className="page-wrap max-w-3xl"><section className="mb-8"><p className="eyebrow">DATA CONTRIBUTION</p><h1 className="page-title">과거 자소서 기여</h1><p className="page-subtitle">검증된 기여는 익명화되어 유사 사례 분석에만 사용되며, 500 보상 크레딧을 지급합니다.</p></section><form onSubmit={submit} className="surface-card space-y-5 p-6"><div className="grid gap-4 sm:grid-cols-2"><label><span className="form-label">회사명</span><input className="text-input" value={company} onChange={(event) => setCompany(event.target.value)} /></label><label><span className="form-label">지원 직무</span><input className="text-input" value={role} onChange={(event) => setRole(event.target.value)} /></label><label><span className="form-label">지원 시기</span><input className="text-input" type="month" value={applicationPeriod} onChange={(event) => setPeriod(event.target.value)} /></label><label><span className="form-label">지원 결과</span><select className="text-input" value={result} onChange={(event) => setResult(event.target.value as "passed" | "failed")}><option value="passed">합격</option><option value="failed">불합격</option></select></label></div><label><span className="form-label">자소서 문항</span><textarea className="question-editor" value={question} onChange={(event) => setQuestion(event.target.value)} /></label><label><span className="form-label">답변</span><textarea className="contribution-editor" value={answer} onChange={(event) => setAnswer(event.target.value)} /><span className="mt-1 block text-right text-xs text-slate-400">{answer.trim().length} / 최소 100자</span></label><label className="flex items-start gap-3 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-600"><input className="mt-1" type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} /> <span><strong className="text-slate-900">[v1 초안] 익명화 및 AI 분석 활용에 동의합니다.</strong><br />이름·이메일·전화번호 등 식별 정보는 제거한 뒤 유사 사례 검색과 AI 분석에만 사용됩니다. 정식 공개 전 법률 검토가 필요한 초안입니다.</span></label><Button disabled={saving} type="submit" className="h-12 w-full bg-blue-600 text-base hover:bg-blue-700">{saving ? "검증·저장 중…" : "제출하고 500 크레딧 받기"}</Button></form><p className="mt-5 text-sm text-slate-500">현재 보유 크레딧: {state.creditBalance.toLocaleString()} · <button type="button" className="font-bold text-blue-600" onClick={() => router.push("/credits")}>거래 내역 보기</button></p></main>
+}
+
+function RealCreditPage({ state }: { state: AppState }) {
+  const router = useRouter()
+  return <main className="page-wrap max-w-4xl"><button onClick={() => router.back()} className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4" />돌아가기</button><section className="mb-8"><p className="eyebrow">CREDIT</p><h1 className="page-title">크레딧</h1><p className="page-subtitle">기본 크레딧은 매월 1일 초기화되고, 기여 보상 크레딧은 유지됩니다.</p></section><div className="surface-card p-6"><div className="rounded-2xl bg-slate-950 p-6 text-white"><Coins className="size-8 text-amber-400" /><p className="mt-4 text-sm text-slate-400">현재 사용 가능 크레딧</p><p className="mt-1 text-4xl font-bold">{state.creditBalance.toLocaleString()}</p><p className="mt-4 text-sm text-slate-400">AI 코치 10 · AI 분석 100 크레딧</p></div><h2 className="mt-7 font-bold">거래 내역</h2><div className="mt-3 divide-y divide-slate-100">{state.transactions.length ? state.transactions.map((item) => <div key={item.id} className="flex items-center justify-between py-3 text-sm"><span>{item.reason}</span><strong className={item.amount > 0 ? "text-emerald-600" : "text-slate-900"}>{item.amount > 0 ? "+" : ""}{item.amount.toLocaleString()}</strong></div>) : <p className="py-8 text-center text-sm text-slate-400">거래 내역이 없습니다.</p>}</div><div className="mt-6 rounded-xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">결제 충전은 아직 준비 중입니다. 과거 자소서를 기여하면 검증 후 500 크레딧을 받을 수 있습니다.</div><Button variant="outline" className="mt-4" onClick={() => router.push("/contribute")}><FilePlus2 />자소서 기여하기</Button></div></main>
 }
 
 function LoginPage() {
@@ -77,7 +107,7 @@ function EvidenceSection({ state }: { state: AppState }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<EvidenceFile | null>(null)
   const upload = async (files: FileList | null) => { for (const file of Array.from(files ?? [])) { try { await localServices.files.add(file); toast.success(`${file.name} 업로드 완료`) } catch (error) { toast.error(error instanceof Error ? error.message : "업로드에 실패했습니다.") } } }
-  return <section className="surface-card overflow-hidden"><div className="flex items-start justify-between border-b border-slate-100 p-5"><div><h2 className="section-title">첨부 자료</h2><p className="section-help">파일을 클릭하면 바로 열람할 수 있어요.</p></div><Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}><Upload />업로드</Button><input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.hwpx" onChange={(event) => upload(event.target.files)} /></div><div className="p-3">{state.files.length ? state.files.map((file) => <FileRow key={file.id} file={file} onOpen={() => setPreview(file)} onDelete={() => { if (preview?.id === file.id) setPreview(null) }} />) : <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-slate-200 text-center text-sm text-slate-400"><div><Paperclip className="mx-auto mb-2 size-6" /><p>아직 업로드한 자료가 없어요.</p><p className="mt-1 text-xs">PDF, 이미지, DOC, HWPX 지원</p></div></div>}</div>{preview && <FilePreviewDialog file={preview} onOpenChange={(open) => { if (!open) setPreview(null) }} />}</section>
+  return <section className="surface-card overflow-hidden"><div className="flex items-start justify-between border-b border-slate-100 p-5"><div><h2 className="section-title">첨부 자료</h2><p className="section-help">파일을 클릭하면 바로 열람할 수 있어요.</p></div><Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}><Upload />업로드</Button><input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx,.hwpx,.txt,.md" onChange={(event) => upload(event.target.files)} /></div><div className="p-3">{state.files.length ? state.files.map((file) => <FileRow key={file.id} file={file} onOpen={() => setPreview(file)} onDelete={() => { if (preview?.id === file.id) setPreview(null) }} />) : <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-slate-200 text-center text-sm text-slate-400"><div><Paperclip className="mx-auto mb-2 size-6" /><p>아직 업로드한 자료가 없어요.</p><p className="mt-1 text-xs">PDF, 이미지, DOCX, HWPX, TXT, MD 지원</p></div></div>}</div>{preview && <FilePreviewDialog file={preview} onOpenChange={(open) => { if (!open) setPreview(null) }} />}</section>
 }
 
 function FileRow({ file, onOpen, onDelete }: { file: EvidenceFile; onOpen: () => void; onDelete: () => void }) {
@@ -127,7 +157,7 @@ function FilePreviewBody({ file, fillHeight = false }: { file: EvidenceFile; fil
 }
 
 function FilePreviewDialog({ file, onOpenChange }: { file: EvidenceFile; onOpenChange: (open: boolean) => void }) {
-  return <Dialog open onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-[min(960px,calc(100vw-2rem))]"><DialogHeader className="border-b border-slate-200 px-6 py-4 text-left"><DialogTitle className="truncate pr-8 text-lg">{file.name}</DialogTitle><DialogDescription>{formatBytes(file.size)} · 목업에서는 브라우저에 저장된 원본을 그대로 보여줍니다.</DialogDescription></DialogHeader><FilePreviewBody key={file.id} file={file} /></DialogContent></Dialog>
+  return <Dialog open onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-[min(960px,calc(100vw-2rem))]"><DialogHeader className="border-b border-slate-200 px-6 py-4 text-left"><DialogTitle className="truncate pr-8 text-lg">{file.name}</DialogTitle><DialogDescription>{formatBytes(file.size)} · 원본은 즉시 열람할 수 있고, 텍스트 추출은 AI 분석용으로 백그라운드 처리됩니다.</DialogDescription>{file.extractionStatus === "failed" && <Button variant="outline" size="sm" className="mt-3 w-fit" onClick={async () => { try { await localServices.files.retry(file); toast.success("AI 텍스트 추출을 다시 요청했습니다.") } catch (error) { toast.error(error instanceof Error ? error.message : "재처리에 실패했습니다.") } }}>AI 텍스트 추출 다시 시도</Button>}</DialogHeader><FilePreviewBody key={file.id} file={file} /></DialogContent></Dialog>
 }
 
 function FilePreviewPane({ file, onClose }: { file: EvidenceFile; onClose: () => void }) {

@@ -26,6 +26,7 @@ export interface EvidenceFile {
   extractedText?: string
   /** 텍스트 추출 진행 상태. 목업에서는 업로드 직후 백그라운드로 채운다. */
   extractionStatus?: ExtractionStatus
+  extractionError?: string
 }
 
 export interface Project {
@@ -52,6 +53,8 @@ export interface Essay {
   question: string
   answer: string
   order: number
+  /** 서버 저장본의 낙관적 동시성 버전. */
+  version?: number
   updatedAt: string
 }
 
@@ -146,10 +149,11 @@ export interface FileRepository {
   add(file: File, projectId?: string): Promise<EvidenceFile>
   download(file: EvidenceFile): Promise<void>
   open(file: EvidenceFile): Promise<string>
+  retry(file: EvidenceFile): Promise<void>
   remove(file: EvidenceFile): Promise<void>
   /**
    * 파일 원본에서 LLM 컨텍스트용 플레인 텍스트를 추출해 메타데이터에 캐싱하고
-   * 반환한다. 이미 추출된 경우 캐시를 재사용한다. Supabase 전환 시 이 로직은
+   * 반환한다. 이미 추출된 경우 캐시를 재사용한다. 실제 서비스에서는 Supabase
    * Edge Function 기반 서버 추출(및 익명화)로 대체된다.
    */
   extractText(file: EvidenceFile): Promise<string>

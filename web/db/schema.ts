@@ -1,4 +1,3 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
+// Supabase Postgres schema and RLS policies live in supabase/migrations.
+// This legacy Drizzle/D1 entrypoint remains empty while Cloudflare hosts the app.
 export {};

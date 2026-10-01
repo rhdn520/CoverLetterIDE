@@ -248,7 +248,7 @@ export const localServices = {
       }
       // 업로드 직후에는 추출 대기 상태로 기록한다. 실제 텍스트는 아래에서 백그라운드로 채운다.
       const record: EvidenceFile = { id: id(), name: file.name, size: file.size, type: file.type, createdAt: now(), extractionStatus: "pending" }
-      // 메타데이터와 원본 Blob을 분리한다. 이는 Supabase의 DB 행과 Storage 객체 구조에 대응한다.
+      // 메타데이터와 원본 Blob을 분리한다. 이는 Supabase DB 행과 Storage 객체 구조에 대응한다.
       await putBlob(record.id, file)
       update((s) => ({
         ...s,
