@@ -33,7 +33,11 @@ Deno.serve(async (request) => {
       const passed = ranked.filter((item: any) => item.result === "passed").slice(0, 5); const failed = ranked.filter((item: any) => item.result === "failed").slice(0, 5)
       const reportCompletion: any = await openAI("/chat/completions", { model: Deno.env.get("OPENAI_CHAT_MODEL") ?? "gpt-4.1-mini", response_format: { type: "json_object" }, messages: [{ role: "system", content: "Return Korean JSON only: {strengths:string[],weaknesses:string[],suggestions:string[]}. Do not identify any contributor." }, { role: "user", content: `지원자 자소서:\n${fullEssay}\n\n익명 합격 사례:\n${passed.map((x: any) => x.answer).join("\n---\n")}\n\n익명 불합격 사례:\n${failed.map((x: any) => x.answer).join("\n---\n")}` }] })
       const report = JSON.parse(reportCompletion.choices?.[0]?.message?.content ?? "{}")
-      const score = Math.round(Number(jev.answers?.progress?.score ?? 0) * 25)
+      // JEV progress 점수는 0~4 척도를 가정하고 25를 곱해 0~100으로 환산한다.
+      // 응답이 비거나 숫자가 아니면 0으로 보고, 어떤 경우에도 0~100 범위를 벗어나
+      // numeric(5,2) CHECK(0~100) 제약 위반(=500)이 나지 않도록 clamp 한다.
+      const rawScore = Number(jev?.answers?.progress?.score)
+      const score = Math.min(100, Math.max(0, Math.round((Number.isFinite(rawScore) ? rawScore : 0) * 25)))
       const { error: saveError } = await service.from("analysis_reports").insert({ project_id: projectId, user_id: currentUser.id, cache_key: cacheKey, model_version: `${Deno.env.get("OPENAI_CHAT_MODEL")}|${jev.model ?? Deno.env.get("JEV_MODEL")}`, score, strengths: report.strengths ?? [], weaknesses: report.weaknesses ?? [], suggestions: report.suggestions ?? [], passed_matches: passed.length, failed_matches: failed.length })
       if (saveError) throw saveError
       return response({ ok: true, cached: false })

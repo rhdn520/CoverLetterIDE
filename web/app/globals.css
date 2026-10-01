@@ -184,6 +184,11 @@ button {
   .chat-message.user > p { @apply bg-slate-900 text-white; }
   .chat-message.assistant { @apply pr-6; }
   .chat-message.assistant > p { @apply border border-blue-100 bg-blue-50 text-slate-700; }
+  .chat-typing { @apply inline-flex items-center gap-1; }
+  .chat-typing > span { @apply size-1.5 rounded-full bg-blue-400; animation: chat-typing-bounce 1.2s infinite ease-in-out; }
+  .chat-typing > span:nth-child(2) { animation-delay: 0.15s; }
+  .chat-typing > span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes chat-typing-bounce { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
   .prompt-chip { @apply rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 hover:border-blue-300 hover:text-blue-700; }
   .context-chip { @apply inline-flex max-w-full items-center truncate rounded-full bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700; }
   .mention-menu { @apply absolute bottom-[calc(100%+8px)] left-0 right-0 z-20 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10; }

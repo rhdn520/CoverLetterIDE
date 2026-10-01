@@ -161,6 +161,7 @@ function FilePreviewDialog({ file, onOpenChange }: { file: EvidenceFile; onOpenC
 }
 
 function FilePreviewPane({ file, onClose }: { file: EvidenceFile; onClose: () => void }) {
+  const [retrying, setRetrying] = useState(false)
   const remove = async () => {
     if (!window.confirm(`'${file.name}' 파일을 삭제할까요? 이 자료를 사용하는 모든 프로젝트에서도 제거됩니다.`)) return
     try {
@@ -171,7 +172,20 @@ function FilePreviewPane({ file, onClose }: { file: EvidenceFile; onClose: () =>
       toast.error(error instanceof Error ? error.message : "삭제에 실패했습니다.")
     }
   }
-  return <section className="pane bg-slate-100"><div className="pane-heading bg-white"><div className="min-w-0"><p className="pane-kicker text-blue-600">ATTACHMENT</p><p className="truncate font-bold">{file.name}</p></div><div className="flex shrink-0 items-center gap-1"><button className="icon-button" title="다운로드" onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }}><Download className="size-4" /></button><button className="icon-button text-rose-500 hover:bg-rose-50 hover:text-rose-600" title="삭제" onClick={remove}><Trash2 className="size-4" /></button><button className="icon-button" title="닫고 자소서로 돌아가기" onClick={onClose}><X className="size-4" /></button></div></div><FilePreviewBody key={file.id} file={file} fillHeight /><div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-400"><span>{formatBytes(file.size)} · 첨부 자료를 열람 중입니다. 자소서 문항을 선택하면 편집기로 돌아갑니다.</span><ExtractionBadge status={file.extractionStatus} /></div></section>
+  const retryExtraction = async () => {
+    if (retrying) return
+    setRetrying(true)
+    try {
+      await localServices.files.retry(file)
+      toast.success("AI 텍스트 추출을 다시 요청했어요. 잠시 후 상태가 갱신됩니다.")
+    } catch (error) {
+      // 재시도마저 실패하면 사용자에게 원인과 다음 행동을 분명히 안내한다.
+      toast.error(`${file.name}의 텍스트 추출이 다시 실패했어요. ${error instanceof Error ? error.message : ""} 다른 형식으로 다시 업로드하거나 원본을 확인해 주세요.`)
+    } finally {
+      setRetrying(false)
+    }
+  }
+  return <section className="pane bg-slate-100"><div className="pane-heading bg-white"><div className="min-w-0"><p className="pane-kicker text-blue-600">ATTACHMENT</p><p className="truncate font-bold">{file.name}</p></div><div className="flex shrink-0 items-center gap-1"><button className="icon-button" title="다운로드" onClick={async () => { try { await localServices.files.download(file) } catch (error) { toast.error(error instanceof Error ? error.message : "다운로드 실패") } }}><Download className="size-4" /></button><button className="icon-button text-rose-500 hover:bg-rose-50 hover:text-rose-600" title="삭제" onClick={remove}><Trash2 className="size-4" /></button><button className="icon-button" title="닫고 자소서로 돌아가기" onClick={onClose}><X className="size-4" /></button></div></div>{file.extractionStatus === "failed" && <div className="flex items-center justify-between gap-3 border-b border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-700"><span>이 파일의 AI 텍스트 추출에 실패해 자소서 수정에 활용할 수 없어요. 다시 시도해 보세요.</span><Button variant="outline" size="sm" disabled={retrying} className="h-7 shrink-0 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-100" onClick={() => void retryExtraction()}>{retrying ? "다시 시도 중…" : "추출 다시 시도"}</Button></div>}<FilePreviewBody key={file.id} file={file} fillHeight /><div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-400"><span>{formatBytes(file.size)} · 첨부 자료를 열람 중입니다. 자소서 문항을 선택하면 편집기로 돌아갑니다.</span><ExtractionBadge status={file.extractionStatus} /></div></section>
 }
 
 function ExtractionBadge({ status }: { status?: EvidenceFile["extractionStatus"] }) {
@@ -239,7 +253,17 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
   const selectedEssay = essays.find((essay) => essay.id === selectedEssayId) ?? essays[0]
   const selectedFile = selectedFileId ? state.files.find((file) => file.id === selectedFileId && project.fileIds.includes(file.id)) : undefined
   const activeSuggestion = proposalRef ? state.chats[projectId]?.find((session) => session.id === proposalRef.sessionId)?.messages.find((message) => message.id === proposalRef.messageId)?.suggestions?.find((suggestion) => suggestion.id === proposalRef.suggestionId) : undefined
-  const hasPendingChanges = activeSuggestion?.changeStatuses ? activeSuggestion.changeStatuses.includes("pending") : activeSuggestion?.status === "pending"
+  // 변경 개수는 LLM이 돌려준 changeStatuses가 아니라 실제 diff에서 계산한다.
+  // (모델이 changeStatuses를 비우거나 개수를 틀리게 반환해도 검토 화면이 뜨도록.)
+  const hasPendingChanges = (() => {
+    if (!activeSuggestion) return false
+    const totalChanges = createInlineDiff(activeSuggestion.before, activeSuggestion.after).filter((part) => part.kind === "change").length
+    if (totalChanges === 0) return false
+    const statuses = activeSuggestion.changeStatuses
+    if (statuses && statuses.length === totalChanges) return statuses.includes("pending")
+    // 아직 사용자가 결정하지 않았거나(=undefined) 길이가 안 맞으면 전체를 미결로 본다.
+    return activeSuggestion.status !== "accepted" && activeSuggestion.status !== "rejected"
+  })()
   const selectEssay = (essayId: string) => { setProposalRef(null); setSelectedFileId(null); setSelectedEssayId(essayId); setMobilePane("editor") }
   const createEssay = () => { const essay = localServices.essays.create(project.id); setProposalRef(null); setSelectedFileId(null); setSelectedEssayId(essay.id); setMobilePane("editor") }
   const selectFile = (fileId: string) => { setProposalRef(null); setSelectedFileId(fileId); setMobilePane("editor") }
@@ -276,7 +300,15 @@ function WorkspacePage({ state, projectId }: { state: AppState; projectId: strin
     })
     router.push("/contribute")
   }
-  const previewSuggestion = (reference: ProposalRef & { essayId: string }) => { setSelectedFileId(null); setSelectedEssayId(reference.essayId); setProposalRef(reference); setMobilePane("editor") }
+  const previewSuggestion = (reference: ProposalRef & { essayId: string }) => {
+    // 제안이 가리키는 문항이 실제로 존재하면 그 문항을, 아니면 현재/첫 문항을 연다.
+    // (모델이 잘못된 essayId를 반환해도 가운데 패널에 검토 화면이 뜨도록 보정.)
+    const targetEssay = essays.find((essay) => essay.id === reference.essayId) ?? essays.find((essay) => essay.id === selectedEssayId) ?? essays[0]
+    setSelectedFileId(null)
+    if (targetEssay) setSelectedEssayId(targetEssay.id)
+    setProposalRef(reference)
+    setMobilePane("editor")
+  }
   const filePane = <FilePane state={state} project={project} essays={essays} selectedEssayId={selectedFile ? "" : selectedEssay?.id ?? ""} selectedFileId={selectedFile?.id ?? null} onSelectEssay={selectEssay} onSelectFile={selectFile} onCreateEssay={createEssay} onDeleteEssay={deleteEssay} onDeleteFile={deleteFile} onManageFiles={() => setFilesOpen(true)} onContribute={contribute} />
   const editorPane = selectedFile ? <FilePreviewPane file={selectedFile} onClose={() => setSelectedFileId(null)} /> : selectedEssay ? <EditorPane key={selectedEssay.id} project={project} essay={selectedEssay} review={activeSuggestion && proposalRef && hasPendingChanges ? { reference: proposalRef, suggestion: activeSuggestion } : undefined} onReviewComplete={() => setProposalRef(null)} /> : <EmptyEssay onCreate={createEssay} />
   const chatPane = <ChatPane state={state} project={project} essayId={selectedEssay?.id} onPreviewSuggestion={previewSuggestion} />
@@ -396,6 +428,9 @@ function InlineSuggestion({ suggestion, onDecide }: { suggestion: EssaySuggestio
 function ChatPane({ state, project, essayId, onPreviewSuggestion }: { state: AppState; project: Project; essayId?: string; onPreviewSuggestion: (reference: ProposalRef & { essayId: string }) => void }) {
   const [prompt, setPrompt] = useState("")
   const [contextIds, setContextIds] = useState<string[]>([])
+  const [sending, setSending] = useState(false)
+  // 서버 응답을 기다리는 동안 즉시 보여줄 사용자 메시지. 응답이 오면 서버 상태로 대체된다.
+  const [pending, setPending] = useState<{ text: string; references: string[] } | null>(null)
   const sessions = state.chats[project.id] ?? []
   const [activeSessionId, setActiveSessionId] = useState(sessions[0]?.id ?? "")
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -423,7 +458,7 @@ function ChatPane({ state, project, essayId, onPreviewSuggestion }: { state: App
     setContextIds([])
   }
   const send = async () => {
-    if (!prompt.trim()) return
+    if (sending || !prompt.trim()) return
     let sessionId = activeSessionId
     if (!sessionId) {
       const session = localServices.startChat(project.id)
@@ -432,13 +467,24 @@ function ChatPane({ state, project, essayId, onPreviewSuggestion }: { state: App
     }
     const contexts = contextIds.length ? contextIds : essayId ? [`essay:${essayId}`] : []
     const promptText = prompt.trim()
+    // 보낸 메시지를 즉시 화면에 띄우고(낙관적 표시), 응답 대기 상태로 전환한다.
+    setPending({ text: promptText, references: selectedContexts.map((item) => item.name) })
+    setSending(true)
     setPrompt("")
     setContextIds([])
-    const result = await localServices.sendChat(project.id, sessionId, promptText, contexts)
-    if (!result.ok) return toast.error(result.error)
-    if (result.preview) onPreviewSuggestion({ sessionId, ...result.preview })
+    try {
+      const result = await localServices.sendChat(project.id, sessionId, promptText, contexts)
+      if (!result.ok) { toast.error(result.error ?? "AI 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요."); return }
+      if (result.preview) onPreviewSuggestion({ sessionId, ...result.preview })
+      else toast.info("이번 응답에는 수정 제안이 없어요. 답변 내용을 확인해 주세요.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "AI 요청 중 문제가 발생했어요.")
+    } finally {
+      setSending(false)
+      setPending(null)
+    }
   }
-  return <section className="pane bg-white"><div className="pane-heading"><div className="min-w-0"><div className="flex items-center gap-2"><div className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-600 text-white"><Sparkles className="size-4" /></div><h2 className="truncate font-bold">{historyOpen ? "대화 기록" : activeSession?.title ?? "AI 커리어 코치"}</h2></div><p className="mt-1 truncate text-xs text-slate-400">{historyOpen ? `${sessions.length}개의 저장된 대화` : "여러 파일을 검토하고 수정안을 제안해요 · 10 크레딧"}</p></div><div className="flex gap-1"><button onClick={() => setHistoryOpen(!historyOpen)} className={`icon-button ${historyOpen ? "border-blue-200 bg-blue-50 text-blue-700" : ""}`} title="대화 기록"><History className="size-4" /></button><button onClick={startNewChat} className="icon-button" title="새 대화"><Plus className="size-4" /></button></div></div>{historyOpen ? <ChatHistory sessions={sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => { setActiveSessionId(sessionId); setHistoryOpen(false) }} onNew={startNewChat} /> : <><div className="chat-scroll">{messages.length ? messages.map((message) => <div key={message.id} className={`chat-message ${message.role}`}><span>{message.role === "assistant" ? "AI 코치" : "나"}</span><p>{message.content}</p>{message.references?.length ? <div className="mt-2 flex flex-wrap gap-1">{message.references.map((name) => <span key={name} className="context-chip">@{name}</span>)}</div> : null}{message.reasoning?.length ? <details className="reasoning-panel" open><summary>검토 과정 보기</summary><ol>{message.reasoning.map((step, index) => <li key={step}><span>{index + 1}</span>{step}</li>)}</ol></details> : null}{message.suggestions?.map((suggestion) => <SuggestionCard key={suggestion.id} sessionId={activeSessionId} messageId={message.id} suggestion={suggestion} onPreview={onPreviewSuggestion} />)}</div>) : <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700"><strong className="mb-1 block text-blue-700">새 대화를 시작해 보세요</strong>@를 입력해 여러 문항이나 자료를 태그하고 수정 방향을 알려주세요. 원문은 사용자가 제안을 승인하기 전까지 바뀌지 않습니다.</div>}<div className="mt-3 flex flex-wrap gap-2">{["성과를 수치 중심으로 다듬어줘", "직무와 연결해 수정해줘", "모든 문항의 어조를 통일해줘"].map((text) => <button key={text} onClick={() => setPrompt(text)} className="prompt-chip">{text}</button>)}</div></div><div className="border-t border-slate-200 p-3">{selectedContexts.length ? <div className="mb-2 flex flex-wrap gap-1">{selectedContexts.map((item) => <button key={item.id} onClick={() => setContextIds((current) => current.filter((id) => id !== item.id))} className="context-chip">@{item.name} ×</button>)}</div> : null}<div className="relative"><div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-400">{mentionCandidates.length ? <div className="mention-menu">{mentionCandidates.map((item) => <button key={item.id} onClick={() => chooseContext(item.id, item.name)}><span className="grid size-7 place-items-center rounded-lg bg-blue-50 text-blue-600">{item.kind === "자소서" ? <FileText className="size-4" /> : <Paperclip className="size-4" />}</span><span><strong>{item.name}</strong><small>{item.kind}</small></span></button>)}</div> : null}<textarea rows={2} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send() } }} placeholder="@로 파일을 태그하고 수정 방향을 알려주세요" className="min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none" /><button onClick={send} className="grid size-10 shrink-0 place-items-center rounded-lg bg-blue-600 text-white hover:bg-blue-700" aria-label="메시지 보내기"><Send className="size-4" /></button></div></div></div></>}</section>
+  return <section className="pane bg-white"><div className="pane-heading"><div className="min-w-0"><div className="flex items-center gap-2"><div className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-600 text-white"><Sparkles className="size-4" /></div><h2 className="truncate font-bold">{historyOpen ? "대화 기록" : activeSession?.title ?? "AI 커리어 코치"}</h2></div><p className="mt-1 truncate text-xs text-slate-400">{historyOpen ? `${sessions.length}개의 저장된 대화` : "여러 파일을 검토하고 수정안을 제안해요 · 10 크레딧"}</p></div><div className="flex gap-1"><button onClick={() => setHistoryOpen(!historyOpen)} className={`icon-button ${historyOpen ? "border-blue-200 bg-blue-50 text-blue-700" : ""}`} title="대화 기록"><History className="size-4" /></button><button onClick={startNewChat} className="icon-button" title="새 대화"><Plus className="size-4" /></button></div></div>{historyOpen ? <ChatHistory sessions={sessions} activeSessionId={activeSessionId} onSelect={(sessionId) => { setActiveSessionId(sessionId); setHistoryOpen(false) }} onNew={startNewChat} /> : <><div className="chat-scroll">{messages.length || pending ? <>{messages.map((message) => <div key={message.id} className={`chat-message ${message.role}`}><span>{message.role === "assistant" ? "AI 코치" : "나"}</span><p>{message.content}</p>{message.references?.length ? <div className="mt-2 flex flex-wrap gap-1">{message.references.map((name) => <span key={name} className="context-chip">@{name}</span>)}</div> : null}{message.reasoning?.length ? <details className="reasoning-panel" open><summary>검토 과정 보기</summary><ol>{message.reasoning.map((step, index) => <li key={step}><span>{index + 1}</span>{step}</li>)}</ol></details> : null}{message.suggestions?.map((suggestion) => <SuggestionCard key={suggestion.id} sessionId={activeSessionId} messageId={message.id} suggestion={suggestion} onPreview={onPreviewSuggestion} />)}</div>)}{pending ? <><div className="chat-message user"><span>나</span><p>{pending.text}</p>{pending.references.length ? <div className="mt-2 flex flex-wrap gap-1">{pending.references.map((name) => <span key={name} className="context-chip">@{name}</span>)}</div> : null}</div><div className="chat-message assistant"><span>AI 코치</span><p className="flex items-center gap-2 text-slate-400"><span className="chat-typing" aria-hidden><span /><span /><span /></span>답변 작성중…</p></div></> : null}</> : <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700"><strong className="mb-1 block text-blue-700">새 대화를 시작해 보세요</strong>@를 입력해 여러 문항이나 자료를 태그하고 수정 방향을 알려주세요. 원문은 사용자가 제안을 승인하기 전까지 바뀌지 않습니다.</div>}<div className="mt-3 flex flex-wrap gap-2">{["성과를 수치 중심으로 다듬어줘", "직무와 연결해 수정해줘", "모든 문항의 어조를 통일해줘"].map((text) => <button key={text} onClick={() => setPrompt(text)} className="prompt-chip">{text}</button>)}</div></div><div className="border-t border-slate-200 p-3">{selectedContexts.length ? <div className="mb-2 flex flex-wrap gap-1">{selectedContexts.map((item) => <button key={item.id} onClick={() => setContextIds((current) => current.filter((id) => id !== item.id))} className="context-chip">@{item.name} ×</button>)}</div> : null}<div className="relative"><div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-blue-400">{mentionCandidates.length ? <div className="mention-menu">{mentionCandidates.map((item) => <button key={item.id} onClick={() => chooseContext(item.id, item.name)}><span className="grid size-7 place-items-center rounded-lg bg-blue-50 text-blue-600">{item.kind === "자소서" ? <FileText className="size-4" /> : <Paperclip className="size-4" />}</span><span><strong>{item.name}</strong><small>{item.kind}</small></span></button>)}</div> : null}<textarea rows={2} value={prompt} disabled={sending} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() } }} placeholder={sending ? "답변을 기다리는 중…" : "@로 파일을 태그하고 수정 방향을 알려주세요"} className="min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none disabled:opacity-60" /><button onClick={() => void send()} disabled={sending || !prompt.trim()} className="grid size-10 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50" aria-label="메시지 보내기">{sending ? <span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Send className="size-4" />}</button></div></div></div></>}</section>
 }
 
 function ChatHistory({ sessions, activeSessionId, onSelect, onNew }: { sessions: ChatSession[]; activeSessionId: string; onSelect: (id: string) => void; onNew: () => void }) {
@@ -469,8 +515,22 @@ function ManageFilesDialog({ open, onOpenChange, state, project }: { open: boole
 
 function AnalysisDialog({ open, onOpenChange, state, project }: { open: boolean; onOpenChange: (open: boolean) => void; state: AppState; project: Project }) {
   const report = [...state.reports].reverse().find((item) => item.projectId === project.id)
-  const run = () => { const result = localServices.runAnalysis(project.id); if (!result.ok) toast.error(result.error); else if (result.cached) toast.info("동일한 내용의 저장된 분석을 불러왔어요."); else toast.success("새 분석이 완료됐어요. 100 크레딧을 사용했습니다.") }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-[min(1100px,calc(100vw-2rem))]"><DialogHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-5 text-left"><div className="flex items-end justify-between gap-4 pr-8"><div><p className="eyebrow">AI ANALYSIS</p><DialogTitle className="text-2xl tracking-tight">{project.company} 지원 분석</DialogTitle><DialogDescription className="mt-1">워크스페이스를 벗어나지 않고 현재 문서의 완성도를 확인하세요.</DialogDescription></div><Button onClick={run} className="shrink-0 bg-blue-600 hover:bg-blue-700"><Sparkles />{report ? "다시 분석" : "100 크레딧으로 분석"}</Button></div></DialogHeader><div className="bg-slate-50 p-4 sm:p-6"><div className="grid gap-4 sm:grid-cols-3"><MetricCard label="마감까지" value={`D-${Math.max(0, daysLeft(project.deadline))}`} help={project.deadline} /><MetricCard label="현재 상태" value={statusLabel[project.status]} help="워크스페이스에서 변경 가능" /><MetricCard label="비교 데이터" value={report ? "10건" : "준비됨"} help="Top-20 재정렬 후 합격 5 · 불합격 5" /></div>{report ? <ReportContent report={report} /> : <div className="mt-5 grid min-h-72 place-items-center rounded-2xl border border-dashed border-slate-300 bg-white text-center"><div className="max-w-md p-8"><LayoutDashboard className="mx-auto size-10 text-blue-500" /><h2 className="mt-4 text-xl font-bold">아직 분석 결과가 없어요</h2><p className="mt-2 text-sm leading-6 text-slate-500">현재 프로필과 자소서를 기준으로 합성된 익명 사례를 비교해 강점과 보완점을 찾습니다. 실제 JEV 또는 벡터 검색은 연결되지 않은 목업입니다.</p></div></div>}</div></DialogContent></Dialog>
+  const [running, setRunning] = useState(false)
+  const run = async () => {
+    if (running) return
+    setRunning(true)
+    try {
+      const result = await localServices.runAnalysis(project.id)
+      if (!result.ok) toast.error(result.error ?? "분석 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.")
+      else if (result.cached) toast.info("동일한 내용의 저장된 분석을 불러왔어요.")
+      else toast.success("새 분석이 완료됐어요. 100 크레딧을 사용했습니다.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "분석 요청 중 문제가 발생했어요.")
+    } finally {
+      setRunning(false)
+    }
+  }
+  return <Dialog open={open} onOpenChange={(next) => { if (!running) onOpenChange(next) }}><DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-[min(1100px,calc(100vw-2rem))]"><DialogHeader className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-5 text-left"><div className="flex items-end justify-between gap-4 pr-8"><div><p className="eyebrow">AI ANALYSIS</p><DialogTitle className="text-2xl tracking-tight">{project.company} 지원 분석</DialogTitle><DialogDescription className="mt-1">워크스페이스를 벗어나지 않고 현재 문서의 완성도를 확인하세요.</DialogDescription></div><Button onClick={() => void run()} disabled={running} className="shrink-0 bg-blue-600 hover:bg-blue-700 disabled:opacity-60">{running ? <><span className="size-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />분석 중…</> : <><Sparkles />{report ? "다시 분석" : "100 크레딧으로 분석"}</>}</Button></div></DialogHeader><div className="bg-slate-50 p-4 sm:p-6"><div className="grid gap-4 sm:grid-cols-3"><MetricCard label="마감까지" value={`D-${Math.max(0, daysLeft(project.deadline))}`} help={project.deadline} /><MetricCard label="현재 상태" value={statusLabel[project.status]} help="워크스페이스에서 변경 가능" /><MetricCard label="비교 데이터" value={report ? "10건" : "준비됨"} help="Top-20 재정렬 후 합격 5 · 불합격 5" /></div>{report ? <ReportContent report={report} /> : <div className="mt-5 grid min-h-72 place-items-center rounded-2xl border border-dashed border-slate-300 bg-white text-center"><div className="max-w-md p-8"><LayoutDashboard className="mx-auto size-10 text-blue-500" /><h2 className="mt-4 text-xl font-bold">아직 분석 결과가 없어요</h2><p className="mt-2 text-sm leading-6 text-slate-500">현재 프로필과 자소서를 기준으로 합성된 익명 사례를 비교해 강점과 보완점을 찾습니다. 실제 JEV 또는 벡터 검색은 연결되지 않은 목업입니다.</p></div></div>}</div></DialogContent></Dialog>
 }
 
 function MetricCard({ label, value, help }: { label: string; value: string; help: string }) { return <div className="surface-card p-5"><p className="text-sm font-bold text-slate-500">{label}</p><p className="mt-3 text-3xl font-bold tracking-tight">{value}</p><p className="mt-2 text-xs text-slate-400">{help}</p></div> }
