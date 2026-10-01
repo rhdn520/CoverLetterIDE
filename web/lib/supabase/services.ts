@@ -145,13 +145,29 @@ export const supabaseServices = {
   },
   credits: { spend: () => false, reward: () => false, charge: () => undefined },
   startChat(projectId: string) { const session: ChatSession = { id: id(), title: "새 대화", messages: [], createdAt: now(), updatedAt: now() }; patch((current) => ({ ...current, chats: { ...current.chats, [projectId]: [session, ...(current.chats[projectId] ?? [])] } })); void requireUser().then((user) => client.from("chat_sessions").insert({ id: session.id, project_id: projectId, user_id: user.id, title: session.title })).then(({ error }) => { if (error) void refresh() }); return session },
-  async sendChat(projectId: string, sessionId: string, prompt: string, contextIds: string[] = []) { const { data, error } = await client.functions.invoke("ai-chat", { body: { projectId, sessionId, prompt, contextIds, requestId: id() } }); if (error) return { ok: false, error: error.message }; await refresh(); return { ok: true, preview: data?.preview } },
+  async sendChat(projectId: string, sessionId: string, prompt: string, contextIds: string[] = []) { const { data, error } = await client.functions.invoke("ai-chat", { body: { projectId, sessionId, prompt, contextIds, requestId: id() } }); if (error) { const fn = await describeFunctionError(error); return { ok: false, error: fn.message, insufficientCredits: fn.insufficientCredits } } await refresh(); return { ok: true, preview: data?.preview } },
   acceptSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number) { return applySuggestionDecision(projectId, sessionId, messageId, suggestionId, changeIndex, "accepted") },
   rejectSuggestion(projectId: string, sessionId: string, messageId: string, suggestionId: string, changeIndex: number) { return applySuggestionDecision(projectId, sessionId, messageId, suggestionId, changeIndex, "rejected") },
-  async runAnalysis(projectId: string) { const { data, error } = await client.functions.invoke("analyze-project", { body: { projectId, requestId: id() } }); if (error) return { ok: false, error: error.message }; await refresh(); return { ok: true, cached: Boolean(data?.cached) } },
+  async runAnalysis(projectId: string) { const { data, error } = await client.functions.invoke("analyze-project", { body: { projectId, requestId: id() } }); if (error) { const fn = await describeFunctionError(error); return { ok: false, error: fn.message, insufficientCredits: fn.insufficientCredits } } await refresh(); return { ok: true, cached: Boolean(data?.cached) } },
   async contribute(input: any) { const { data, error } = await client.functions.invoke("index-contribution", { body: { ...input, consentVersion: "2026-10-v1" } }); if (error) throw error; await refresh(); return data },
   setContributionDraft(draft: typeof contributionDraft) { contributionDraft = draft },
   takeContributionDraft() { const draft = contributionDraft; contributionDraft = null; return draft },
+}
+
+// Edge Function 오류를 사용자 친화적으로 해석한다. supabase-js의 FunctionsHttpError는
+// 원본 Response를 error.context에 담아둔다. 여기서 상태 코드(402=크레딧 부족)와
+// 응답 본문의 error 메시지를 꺼내, 호출부가 "에러"가 아니라 "크레딧 부족 안내"로
+// 구분해 다룰 수 있게 한다.
+async function describeFunctionError(error: any): Promise<{ message: string; insufficientCredits: boolean }> {
+  const context = error?.context
+  const status: number | undefined = typeof context?.status === "number" ? context.status : undefined
+  let bodyMessage: string | undefined
+  if (context && typeof context.json === "function") {
+    try { const body = await context.clone().json(); bodyMessage = typeof body?.error === "string" ? body.error : undefined }
+    catch { /* 본문이 JSON이 아니면 무시 */ }
+  }
+  const insufficientCredits = status === 402 || (bodyMessage?.includes("크레딧이 부족") ?? false)
+  return { message: bodyMessage ?? error?.message ?? "요청을 처리하지 못했습니다.", insufficientCredits }
 }
 
 async function fileRowForOwner(file: EvidenceFile) {
